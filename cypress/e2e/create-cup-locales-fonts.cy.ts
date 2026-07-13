@@ -8,7 +8,8 @@ describe('Locales and free fonts', () => {
   localeCases.forEach(({locale, expected, text, font}) => {
     it(`supports text layers and font switching for ${locale}`, () => {
       cy.visit(`/${locale}/create-cup`);
-      cy.contains('h1', expected).should('be.visible');
+      cy.get('[data-testid="add-text-button"]', {timeout: 20000}).should('be.visible');
+      cy.contains('h1', expected, {timeout: 20000}).should('be.visible');
 
       cy.get('[data-testid="add-text-button"]').click();
       cy.get('[data-testid="layer-item-0"]').click();

@@ -6,7 +6,8 @@ describe('Create cup buttons and primary actions', () => {
     }).as('printRequest');
 
     cy.visit('/uk/create-cup');
-    cy.contains('h1', 'Створи власний дизайн кружки').should('be.visible');
+    cy.get('[data-testid="add-text-button"]', {timeout: 20000}).should('be.visible');
+    cy.contains('h1', 'Створи власний дизайн кружки', {timeout: 20000}).should('be.visible');
 
     cy.get('[data-testid="site-nav-home"]').should('be.visible');
     cy.get('[data-testid="locale-switch-en"]').click();
@@ -32,8 +33,13 @@ describe('Create cup buttons and primary actions', () => {
     cy.get('[data-testid="text-layer-font"]').select('Playfair Display');
     cy.get('[data-testid="text-layer-color"]').invoke('val', '#0f172a').trigger('input').trigger('change');
     cy.get('[data-testid="text-layer-font-size"]').invoke('val', 58).trigger('input').trigger('change');
+    cy.get('[data-testid="layer-blend-mode"]').select('multiply').should('have.value', 'multiply');
     cy.get('[data-testid="layer-opacity"]').invoke('val', 0.85).trigger('input').trigger('change');
     cy.get('[data-testid="layer-rotation"]').invoke('val', 12).trigger('input').trigger('change');
+    const dataTransfer = new DataTransfer();
+    cy.get('[data-testid="layer-item-1"]').trigger('dragstart', {dataTransfer});
+    cy.get('[data-testid="layer-item-0"]').trigger('dragover', {dataTransfer}).trigger('drop', {dataTransfer});
+    cy.get('[data-testid="layer-item-0"]').should('have.attr', 'data-layer-type', 'text');
     cy.get('[data-testid="layer-up-button"]').click();
     cy.get('[data-testid="layer-down-button"]').click();
 

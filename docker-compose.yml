@@ -20,7 +20,8 @@ services:
       && exec su-exec 1000:1000 npm run dev"
 
   cypress:
-    image: cypress/included:15.1.0
+    image: cypress/included:15.18.1
+    entrypoint: []
     working_dir: /e2e
     depends_on:
       - next-app

@@ -16,7 +16,8 @@ describe('Create cup responsive layouts', () => {
     it(`renders layout ${id} (${name})`, () => {
       cy.viewport(width, height);
       cy.visit('/uk/create-cup');
-      cy.contains('h1', 'Створи власний дизайн кружки').should('be.visible');
+      cy.get('[data-testid="add-text-button"]', {timeout: 20000}).should('be.visible');
+      cy.contains('h1', 'Створи власний дизайн кружки', {timeout: 20000}).should('be.visible');
 
       cy.get('[data-testid="image-input"]').selectFile('cypress/fixtures/sample-badge.svg', {force: true});
       cy.get('[data-testid="add-text-button"]').click();

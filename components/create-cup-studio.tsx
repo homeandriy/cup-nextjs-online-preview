@@ -1,13 +1,15 @@
 'use client';
 
 import {Canvas, useLoader} from '@react-three/fiber';
-import {Bounds, Environment, OrbitControls} from '@react-three/drei';
+import {Center, Environment, OrbitControls} from '@react-three/drei';
 import type {KonvaEventObject} from 'konva/lib/Node';
+import type {Layer as KonvaLayerNode} from 'konva/lib/Layer';
 import type {Image as KonvaImageNode} from 'konva/lib/shapes/Image';
 import type {Text as KonvaTextNode} from 'konva/lib/shapes/Text';
 import type {Stage as KonvaStage} from 'konva/lib/Stage';
 import type {Transformer as KonvaTransformer} from 'konva/lib/shapes/Transformer';
 import {useLocale, useTranslations} from 'next-intl';
+import type {DragEvent as ReactDragEvent} from 'react';
 import {Suspense, useEffect, useId, useMemo, useRef, useState} from 'react';
 import {
   Image as KonvaImage,
@@ -24,15 +26,17 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import useImage from 'use-image';
 
 import {SiteNav} from '@/components/site-nav';
+import {useAppStore} from '@/components/providers/app-store-provider';
 
 const PRINT_DPI = 300;
-const EDITOR_DPI = 120;
+const EDITOR_DPI = 90;
 const MILLIMETERS_IN_INCH = 25.4;
 const DEFAULT_TEXT_COLOR = '#1f2937';
 
-type MugType = 'classic11oz' | 'rimRed' | 'large15oz' | 'spoonHandle';
+export type MugType = 'classic11oz' | 'rimRed' | 'large15oz' | 'spoonHandle';
 type MugModelFormat = 'glb' | 'gltf' | 'fbx' | 'obj';
 type DesignLayerType = 'image' | 'text';
+type BlendMode = 'source-over' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten';
 
 type MugSpec = {
   id: MugType;
@@ -61,6 +65,7 @@ type BaseLayer = {
   height: number;
   rotation: number;
   opacity: number;
+  blendMode: BlendMode;
 };
 
 type ImageLayer = BaseLayer & {
@@ -77,7 +82,7 @@ type TextLayer = BaseLayer & {
   align: 'left' | 'center' | 'right';
 };
 
-type DesignLayer = ImageLayer | TextLayer;
+export type DesignLayer = ImageLayer | TextLayer;
 
 type FontOption = {
   id: string;
@@ -96,6 +101,15 @@ const FONT_OPTIONS: FontOption[] = [
   {id: 'oswald', family: 'Oswald', label: 'Oswald'},
   {id: 'pt-serif', family: 'PT Serif', label: 'PT Serif'},
   {id: 'roboto-slab', family: 'Roboto Slab', label: 'Roboto Slab'}
+];
+
+const BLEND_MODE_OPTIONS: Array<{value: BlendMode; label: string}> = [
+  {value: 'source-over', label: 'Звичайний'},
+  {value: 'multiply', label: 'Множення'},
+  {value: 'screen', label: 'Екран'},
+  {value: 'overlay', label: 'Перекриття'},
+  {value: 'darken', label: 'Затемнення'},
+  {value: 'lighten', label: 'Освітлення'}
 ];
 
 const MUG_SPECS: MugSpec[] = [
@@ -222,16 +236,39 @@ function getLayerKindLabel(t: ReturnType<typeof useTranslations>, layer: DesignL
   return layer.type === 'text' ? t('layers.kinds.text') : t('layers.kinds.image');
 }
 
+function normalizeLayerPositionForDimensions(
+  layer: DesignLayer,
+  stageWidth: number,
+  stageHeight: number,
+  safeZoneWidth: number
+): DesignLayer {
+  const minX = safeZoneWidth;
+  const maxX = Math.max(safeZoneWidth, stageWidth - safeZoneWidth - layer.width);
+  const minY = 0;
+  const maxY = Math.max(0, stageHeight - layer.height);
+
+  return {
+    ...layer,
+    x: Math.min(Math.max(layer.x, minX), maxX),
+    y: Math.min(Math.max(layer.y, minY), maxY)
+  };
+}
+
 export function CreateCupStudio() {
   const t = useTranslations('CreateCupPage');
   const locale = useLocale();
   const inputId = useId();
   const stageRef = useRef<KonvaStage | null>(null);
+  const designLayerRef = useRef<KonvaLayerNode | null>(null);
   const mugListRef = useRef<HTMLDivElement | null>(null);
 
-  const [mugType, setMugType] = useState<MugType>('classic11oz');
-  const [layers, setLayers] = useState<DesignLayer[]>([]);
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const mugType = useAppStore((state) => state.mugType);
+  const layers = useAppStore((state) => state.layers);
+  const selectedLayerId = useAppStore((state) => state.selectedLayerId);
+  const setMugType = useAppStore((state) => state.setMugType);
+  const setLayers = useAppStore((state) => state.setLayers);
+  const setSelectedLayerId = useAppStore((state) => state.setSelectedLayerId);
+  const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [previewTextureUrl, setPreviewTextureUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
@@ -244,44 +281,67 @@ export function CreateCupStudio() {
   const exportScale = PRINT_DPI / EDITOR_DPI;
   const selectedLayer = layers.find((layer) => layer.id === selectedLayerId) ?? null;
 
-  function normalizeLayerPosition(layer: DesignLayer): DesignLayer {
-    const minX = safeZoneWidth;
-    const maxX = Math.max(safeZoneWidth, stageWidth - safeZoneWidth - layer.width);
-    const minY = 0;
-    const maxY = Math.max(0, stageHeight - layer.height);
+  function buildExportDataUrl(pixelRatio: number) {
+    const designLayer = designLayerRef.current;
 
-    return {
-      ...layer,
-      x: Math.min(Math.max(layer.x, minX), maxX),
-      y: Math.min(Math.max(layer.y, minY), maxY)
-    };
+    if (!designLayer) {
+      return '';
+    }
+
+    const transformers = designLayer.find('Transformer');
+    const transformerVisibility = transformers.map((transformer) => transformer.visible());
+
+    transformers.forEach((transformer) => transformer.visible(false));
+
+    try {
+      return designLayer.toDataURL({
+        pixelRatio,
+        mimeType: 'image/png'
+      });
+    } finally {
+      transformers.forEach((transformer, index) => transformer.visible(transformerVisibility[index]));
+      designLayer.batchDraw();
+    }
+  }
+
+  function normalizeLayerPosition(layer: DesignLayer): DesignLayer {
+    return normalizeLayerPositionForDimensions(layer, stageWidth, stageHeight, safeZoneWidth);
   }
 
   useEffect(() => {
-    if (!stageRef.current) {
+    if (!designLayerRef.current) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
-      if (!stageRef.current) {
+      const nextPreviewTextureUrl = buildExportDataUrl(1);
+
+      if (!nextPreviewTextureUrl) {
         return;
       }
 
-      setPreviewTextureUrl(
-        stageRef.current.toDataURL({
-          pixelRatio: 1,
-          mimeType: 'image/png'
-        })
-      );
+      setPreviewTextureUrl(nextPreviewTextureUrl);
     }, 80);
 
     return () => window.clearTimeout(timeoutId);
   }, [layers, mugType, stageHeight, stageWidth]);
 
   function chooseMugType(nextType: MugType) {
+    if (nextType === mugType) {
+      return;
+    }
+
+    const nextSpec = getSpec(nextType);
+    const nextStageWidth = mmToPixels(nextSpec.templateWidthMm, EDITOR_DPI);
+    const nextStageHeight = mmToPixels(nextSpec.templateHeightMm, EDITOR_DPI);
+    const nextSafeZoneWidth = mmToPixels(nextSpec.handleSafeZoneMm, EDITOR_DPI);
+
     setMugType(nextType);
-    setLayers([]);
-    setSelectedLayerId(null);
+    setLayers((current) =>
+      current.map((layer) =>
+        normalizeLayerPositionForDimensions(layer, nextStageWidth, nextStageHeight, nextSafeZoneWidth)
+      )
+    );
     setStatusMessage(null);
     setPreviewTextureUrl('');
   }
@@ -318,6 +378,31 @@ export function CreateCupStudio() {
       const next = [...current];
       const [item] = next.splice(index, 1);
       next.splice(targetIndex, 0, item);
+      return next;
+    });
+  }
+
+  function reorderLayers(sourceLayerId: string, targetLayerId: string) {
+    if (sourceLayerId === targetLayerId) {
+      return;
+    }
+
+    setLayers((current) => {
+      const sourceIndex = current.findIndex((layer) => layer.id === sourceLayerId);
+      const targetIndex = current.findIndex((layer) => layer.id === targetLayerId);
+
+      if (sourceIndex === -1 || targetIndex === -1) {
+        return current;
+      }
+
+      const next = [...current];
+      const [sourceLayer] = next.splice(sourceIndex, 1);
+
+      if (!sourceLayer) {
+        return current;
+      }
+
+      next.splice(targetIndex, 0, sourceLayer);
       return next;
     });
   }
@@ -364,7 +449,8 @@ export function CreateCupStudio() {
             width,
             height,
             rotation: 0,
-            opacity: 1
+            opacity: 1,
+            blendMode: 'source-over'
           };
 
           setLayers((current) => [...current, normalizeLayerPosition(nextLayer)]);
@@ -398,13 +484,66 @@ export function CreateCupStudio() {
       width,
       height,
       rotation: 0,
-      opacity: 1
+      opacity: 1,
+      blendMode: 'source-over'
     };
 
     setLayers((current) => [...current, normalizeLayerPosition(nextLayer)]);
     setSelectedLayerId(nextLayer.id);
     setStatusMessage(null);
   }
+
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !(window as Window & {Cypress?: unknown}).Cypress) {
+      return;
+    }
+
+    const debugWindow = window as Window & {
+      __cupStudioTest?: {
+        getState: () => {
+          stageWidth: number;
+          stageHeight: number;
+          safeZoneWidth: number;
+          layers: DesignLayer[];
+          mugType: MugType;
+        };
+        getExportDataUrl: () => string;
+        setLayerPosition: (index: number, patch: {x?: number; y?: number}) => void;
+      };
+    };
+
+    debugWindow.__cupStudioTest = {
+      getState: () => ({
+        stageWidth,
+        stageHeight,
+        safeZoneWidth,
+        layers,
+        mugType
+      }),
+      getExportDataUrl: () => buildExportDataUrl(1),
+      setLayerPosition: (index, patch) => {
+        setLayers((current) => {
+          const layer = current[index];
+
+          if (!layer) {
+            return current;
+          }
+
+          const next = [...current];
+          next[index] = normalizeLayerPosition({
+            ...layer,
+            ...patch
+          });
+          return next;
+        });
+      }
+    };
+
+    return () => {
+      delete debugWindow.__cupStudioTest;
+    };
+  }, [layers, mugType, normalizeLayerPosition, setLayers, stageHeight, stageWidth, safeZoneWidth]);
 
   async function submitToPrint() {
     if (!stageRef.current) {
@@ -415,10 +554,11 @@ export function CreateCupStudio() {
     setStatusMessage(null);
 
     try {
-      const imageDataUrl = stageRef.current.toDataURL({
-        pixelRatio: exportScale,
-        mimeType: 'image/png'
-      });
+      const imageDataUrl = buildExportDataUrl(exportScale);
+
+      if (!imageDataUrl) {
+        throw new Error(t('status.errorGeneric'));
+      }
 
       const response = await fetch('/api/print', {
         method: 'POST',
@@ -598,13 +738,12 @@ export function CreateCupStudio() {
                       ref={stageRef}
                       width={stageWidth}
                     >
-                      <Layer>
+                      <Layer listening={false}>
                         <Rect fill="#fffdf8" height={stageHeight} stroke="#fed7aa" strokeWidth={2} width={stageWidth} />
                         <Rect fill="rgba(148, 163, 184, 0.14)" height={stageHeight} width={safeZoneWidth} x={0} y={0} />
                         <Rect fill="rgba(148, 163, 184, 0.14)" height={stageHeight} width={safeZoneWidth} x={stageWidth - safeZoneWidth} y={0} />
-                        <KonvaText fill="#ea580c" fontSize={22} text={t('editor.safeZoneLabel')} x={18} y={18} />
-                        <KonvaText fill="#64748b" fontSize={18} text={t('editor.printableLabel')} x={safeZoneWidth + 16} y={18} />
-
+                      </Layer>
+                      <Layer ref={designLayerRef}>
                         {layers.map((layer) =>
                           layer.type === 'image' ? (
                             <EditableImageLayer
@@ -654,15 +793,39 @@ export function CreateCupStudio() {
                     return (
                       <button
                         className={[
-                          'rounded-[1.25rem] border px-4 py-3 text-left transition',
+                          'cursor-grab rounded-[1.25rem] border px-4 py-3 text-left transition active:cursor-grabbing',
+                          draggedLayerId === layer.id ? 'opacity-50' : '',
                           isSelected
                             ? 'border-orange-300 bg-orange-50'
                             : 'border-orange-100 bg-white hover:border-orange-200 hover:bg-orange-50/40'
                         ].join(' ')}
+                        aria-grabbed={draggedLayerId === layer.id}
                         data-layer-type={layer.type}
                         data-testid={`layer-item-${index}`}
+                        draggable
                         key={layer.id}
                         onClick={() => setSelectedLayerId(layer.id)}
+                        onDragEnd={() => setDraggedLayerId(null)}
+                        onDragOver={(event: ReactDragEvent<HTMLButtonElement>) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDragStart={(event: ReactDragEvent<HTMLButtonElement>) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', layer.id);
+                          setDraggedLayerId(layer.id);
+                        }}
+                        onDrop={(event: ReactDragEvent<HTMLButtonElement>) => {
+                          event.preventDefault();
+                          const sourceLayerId = event.dataTransfer.getData('text/plain') || draggedLayerId;
+
+                          if (sourceLayerId) {
+                            reorderLayers(sourceLayerId, layer.id);
+                          }
+
+                          setDraggedLayerId(null);
+                        }}
+                        title="Перетягніть, щоб змінити порядок накладання"
                         type="button"
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -734,6 +897,19 @@ export function CreateCupStudio() {
                       </>
                     ) : null}
 
+                    <label className="grid gap-2 text-sm text-slate-700">
+                      <span className="font-medium">Режим змішування</span>
+                      <select
+                        className="rounded-[1rem] border border-orange-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-orange-400"
+                        data-testid="layer-blend-mode"
+                        onChange={(event) => updateLayer(selectedLayer.id, {blendMode: event.target.value as BlendMode})}
+                        value={selectedLayer.blendMode}
+                      >
+                        {BLEND_MODE_OPTIONS.map((blendMode) => (
+                          <option key={blendMode.value} value={blendMode.value}>{blendMode.label}</option>
+                        ))}
+                      </select>
+                    </label>
                     <RangeField label={t('inspector.opacity')} max={1} min={0.1} onChange={(value) => updateLayer(selectedLayer.id, {opacity: value})} step={0.05} testId="layer-opacity" value={selectedLayer.opacity} />
                     <RangeField label={t('inspector.rotation')} max={180} min={-180} onChange={(value) => updateLayer(selectedLayer.id, {rotation: value})} step={1} testId="layer-rotation" value={selectedLayer.rotation} />
                     <div className="flex flex-wrap gap-2">
@@ -850,6 +1026,7 @@ function EditableImageLayer({
     <>
       <KonvaImage
         draggable
+        globalCompositeOperation={layer.blendMode}
         height={layer.height}
         image={image ?? undefined}
         onClick={onSelect}
@@ -931,6 +1108,7 @@ function EditableTextLayer({
         fill={layer.fill}
         fontFamily={layer.fontFamily}
         fontSize={layer.fontSize}
+        globalCompositeOperation={layer.blendMode}
         height={layer.height}
         onClick={onSelect}
         onDragEnd={(event: KonvaEventObject<DragEvent>) => {
@@ -994,16 +1172,17 @@ function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
 
     const loadedTexture = new THREE.TextureLoader().load(textureUrl);
     loadedTexture.colorSpace = THREE.SRGBColorSpace;
-    loadedTexture.wrapS = THREE.RepeatWrapping;
+    loadedTexture.wrapS = THREE.ClampToEdgeWrapping;
     loadedTexture.wrapT = THREE.ClampToEdgeWrapping;
     loadedTexture.anisotropy = 8;
+    loadedTexture.needsUpdate = true;
     return loadedTexture;
   }, [textureUrl]);
 
   useEffect(() => () => texture?.dispose(), [texture]);
 
   const wallThickness = 0.08;
-  const mugModelSource = resolveAssetSource(process.env.NEXT_PUBLIC_MUG_MODEL_URL?.trim() || 'models/11oz-Mug.fbx');
+  const mugModelSource = resolveAssetSource(process.env.NEXT_PUBLIC_MUG_MODEL_URL?.trim() || 'models/11oz-Mug.obj');
   const mugModelFormat =
     (process.env.NEXT_PUBLIC_MUG_MODEL_FORMAT?.trim().toLowerCase() as MugModelFormat | undefined) ??
     inferMugModelFormat(mugModelSource);
@@ -1031,10 +1210,9 @@ function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
       new THREE.MeshStandardMaterial({
         color: spec.bodyColor,
         roughness: 0.35,
-        metalness: 0.04,
-        map: texture ?? undefined
+        metalness: 0.04
       }),
-    [spec.bodyColor, texture]
+    [spec.bodyColor]
   );
 
   const accentMaterial = useMemo(
@@ -1212,31 +1390,7 @@ function ConfiguredMugModel({
   );
 }
 
-function fitImportedMugModel(root: THREE.Object3D, spec: MugSpec, scaleMultiplier: number, offsetY: number) {
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-
-  if (size.y <= 0) {
-    return;
-  }
-
-  const targetHeight = spec.bodyHeight;
-  const normalizedScale = (targetHeight / size.y) * scaleMultiplier;
-
-  root.scale.setScalar(normalizedScale);
-
-  const scaledBox = new THREE.Box3().setFromObject(root);
-  const scaledSize = scaledBox.getSize(new THREE.Vector3());
-  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
-
-  root.position.set(
-    -scaledCenter.x,
-    -scaledBox.min.y - scaledSize.y / 2 + offsetY,
-    -scaledCenter.z
-  );
-}
-
-function applyTextureToMugModel(root: THREE.Object3D, texture: THREE.Texture | null, bodyColor: string) {
+function findLargestMesh(root: THREE.Object3D) {
   let largestMesh: THREE.Mesh | null = null;
   let largestVolume = -1;
 
@@ -1261,6 +1415,65 @@ function applyTextureToMugModel(root: THREE.Object3D, texture: THREE.Texture | n
     }
   });
 
+  return largestMesh;
+}
+
+function getBodyAxisCenter(min: number, max: number, radius: number) {
+  const fullCenter = (min + max) / 2;
+
+  if (max - min <= radius * 2.15) {
+    return fullCenter;
+  }
+
+  return Math.abs(min) > Math.abs(max) ? max - radius : min + radius;
+}
+
+function getFittedBodyMetrics(root: THREE.Object3D, spec: MugSpec, scaleMultiplier: number, offsetY: number) {
+  const bodyMesh = findLargestMesh(root);
+
+  if (!bodyMesh) {
+    return null;
+  }
+
+  root.updateMatrixWorld(true);
+  const unscaledBodyBox = new THREE.Box3().setFromObject(bodyMesh);
+  const unscaledBodySize = unscaledBodyBox.getSize(new THREE.Vector3());
+
+  if (unscaledBodySize.y <= 0) {
+    return null;
+  }
+
+  const normalizedScale = (spec.bodyHeight / unscaledBodySize.y) * scaleMultiplier;
+  root.scale.setScalar(normalizedScale);
+  root.updateMatrixWorld(true);
+
+  const scaledBodyBox = new THREE.Box3().setFromObject(bodyMesh);
+  const scaledBodySize = scaledBodyBox.getSize(new THREE.Vector3());
+  const bodyRadius = Math.min(scaledBodySize.x, scaledBodySize.z) / 2;
+  const bodyCenter = new THREE.Vector3(
+    getBodyAxisCenter(scaledBodyBox.min.x, scaledBodyBox.max.x, bodyRadius),
+    (scaledBodyBox.min.y + scaledBodyBox.max.y) / 2,
+    getBodyAxisCenter(scaledBodyBox.min.z, scaledBodyBox.max.z, bodyRadius)
+  );
+
+  root.position.set(-bodyCenter.x, -bodyCenter.y + offsetY, -bodyCenter.z);
+
+  return {
+    bodyMesh,
+    radiusTop: bodyRadius,
+    radiusBottom: bodyRadius,
+    bodyHeight: scaledBodySize.y,
+    centerY: offsetY
+  };
+}
+
+function fitImportedMugModel(root: THREE.Object3D, spec: MugSpec, scaleMultiplier: number, offsetY: number) {
+  return getFittedBodyMetrics(root, spec, scaleMultiplier, offsetY);
+}
+
+function applyTextureToMugModel(root: THREE.Object3D, texture: THREE.Texture | null, bodyColor: string) {
+  const largestMesh = findLargestMesh(root);
+
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) {
       return;
@@ -1270,12 +1483,54 @@ function applyTextureToMugModel(root: THREE.Object3D, texture: THREE.Texture | n
     child.material = new THREE.MeshStandardMaterial({
       color: isBody ? bodyColor : '#fffefb',
       roughness: isBody ? 0.35 : 0.4,
-      metalness: 0.04,
-      ...(isBody && texture ? {map: texture} : {})
+      metalness: 0.04
     });
     child.castShadow = false;
     child.receiveShadow = false;
   });
+}
+
+function MugArtworkOverlay({
+  bodyHeight,
+  centerY,
+  radiusBottom,
+  radiusTop,
+  texture
+}: {
+  bodyHeight: number;
+  centerY: number;
+  radiusBottom: number;
+  radiusTop: number;
+  texture: THREE.Texture;
+}) {
+  const artworkMaterial = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        alphaTest: 0.01
+      }),
+    [texture]
+  );
+
+  useEffect(() => () => artworkMaterial.dispose(), [artworkMaterial]);
+
+  return (
+    <mesh position={[0, centerY, 0]} rotation={[0, Math.PI, 0]} renderOrder={2} material={artworkMaterial}>
+      <cylinderGeometry
+        args={[
+          radiusTop + 0.004,
+          radiusBottom + 0.004,
+          bodyHeight,
+          160,
+          1,
+          true
+        ]}
+      />
+    </mesh>
+  );
 }
 
 function LoadedGltfMugModel({
@@ -1294,14 +1549,19 @@ function LoadedGltfMugModel({
   offsetY: number;
 }) {
   const gltf = useLoader(GLTFLoader, src);
-  const scene = useMemo(() => {
+  const fitted = useMemo(() => {
     const clonedScene = gltf.scene.clone(true);
     applyTextureToMugModel(clonedScene, texture, spec.bodyColor);
-    fitImportedMugModel(clonedScene, spec, scale, offsetY);
-    return clonedScene;
+    const metrics = fitImportedMugModel(clonedScene, spec, scale, offsetY);
+    return {scene: clonedScene, metrics};
   }, [gltf.scene, offsetY, scale, spec, texture]);
 
-  return <primitive object={scene} rotation={[0, rotationY, 0]} />;
+  return (
+    <group rotation={[0, rotationY, 0]}>
+      <primitive object={fitted.scene} />
+      {texture && fitted.metrics ? <MugArtworkOverlay texture={texture} {...fitted.metrics} /> : null}
+    </group>
+  );
 }
 
 function LoadedFbxMugModel({
@@ -1320,14 +1580,19 @@ function LoadedFbxMugModel({
   offsetY: number;
 }) {
   const object = useLoader(FBXLoader, src);
-  const scene = useMemo(() => {
+  const fitted = useMemo(() => {
     const clonedScene = object.clone(true);
     applyTextureToMugModel(clonedScene, texture, spec.bodyColor);
-    fitImportedMugModel(clonedScene, spec, scale, offsetY);
-    return clonedScene;
+    const metrics = fitImportedMugModel(clonedScene, spec, scale, offsetY);
+    return {scene: clonedScene, metrics};
   }, [object, offsetY, scale, spec, texture]);
 
-  return <primitive object={scene} rotation={[0, rotationY, 0]} />;
+  return (
+    <group rotation={[0, rotationY, 0]}>
+      <primitive object={fitted.scene} />
+      {texture && fitted.metrics ? <MugArtworkOverlay texture={texture} {...fitted.metrics} /> : null}
+    </group>
+  );
 }
 
 function LoadedObjMugModel({
@@ -1346,14 +1611,19 @@ function LoadedObjMugModel({
   offsetY: number;
 }) {
   const object = useLoader(OBJLoader, src);
-  const scene = useMemo(() => {
+  const fitted = useMemo(() => {
     const clonedScene = object.clone(true);
     applyTextureToMugModel(clonedScene, texture, spec.bodyColor);
-    fitImportedMugModel(clonedScene, spec, scale, offsetY);
-    return clonedScene;
+    const metrics = fitImportedMugModel(clonedScene, spec, scale, offsetY);
+    return {scene: clonedScene, metrics};
   }, [object, offsetY, scale, spec, texture]);
 
-  return <primitive object={scene} rotation={[0, rotationY, 0]} />;
+  return (
+    <group rotation={[0, rotationY, 0]}>
+      <primitive object={fitted.scene} />
+      {texture && fitted.metrics ? <MugArtworkOverlay texture={texture} {...fitted.metrics} /> : null}
+    </group>
+  );
 }
 
 function PreviewCanvas({
@@ -1373,21 +1643,27 @@ function PreviewCanvas({
       ].join(' ')}
       data-testid={fullscreen ? 'preview-canvas-fullscreen' : 'preview-canvas'}
     >
-      <div className={fullscreen ? 'min-h-0 flex-1' : 'h-[280px] sm:h-[360px]'}>
-        <Canvas camera={{position: [0, 0.06, fullscreen ? 5.25 : 5.0], fov: fullscreen ? 33 : 37}}>
+      <div className={fullscreen ? 'flex min-h-[70vh] flex-1' : 'h-[280px] sm:h-[360px]'}>
+        <Canvas
+          camera={{position: [0, fullscreen ? 0.2 : 0.1, fullscreen ? 6.2 : 5.3], fov: fullscreen ? 30 : 34, near: 0.1, far: 100}}
+          dpr={[1, 1.5]}
+        >
           <ambientLight intensity={0.75} />
           <directionalLight intensity={1.1} position={[4, 5, 5]} />
           <Environment preset="studio" />
           <Suspense fallback={null}>
-            <Bounds clip fit margin={fullscreen ? 1.08 : 1.28} observe={false}>
+            <Center>
               <MugPreview3D spec={spec} textureUrl={textureUrl} />
-            </Bounds>
+            </Center>
           </Suspense>
           <OrbitControls
             enablePan={false}
-            enableZoom={false}
-            maxPolarAngle={Math.PI - 0.2}
-            minPolarAngle={0.2}
+            enableZoom
+            maxDistance={fullscreen ? 8.5 : 7.2}
+            maxPolarAngle={Math.PI - 0.05}
+            minDistance={fullscreen ? 3.6 : 3.8}
+            minPolarAngle={0.05}
+            target={[0, fullscreen ? 0.68 : 0.28, 0]}
           />
         </Canvas>
       </div>
