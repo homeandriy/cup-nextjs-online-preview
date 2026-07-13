@@ -23,7 +23,7 @@ lint: ## Run ESLint inside the running app container
 	docker compose exec next-app npm run lint
 
 cypress: ## Run Cypress tests; optionally set CYPRESS_SPEC=cypress/e2e/example.cy.ts
-	docker compose run --rm cypress npx cypress run $(if $(CYPRESS_SPEC),--spec $(CYPRESS_SPEC))
+	docker compose run --rm --use-aliases cypress npx cypress run $(if $(CYPRESS_SPEC),--spec $(CYPRESS_SPEC))
 
 logs: ## Follow Next.js container logs
 	docker compose logs -f next-app

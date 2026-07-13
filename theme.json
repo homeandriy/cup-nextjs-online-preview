@@ -1,0 +1,12 @@
+{
+  "colors": {
+    "orange": "#FF6900",
+    "blue": "#0096FF",
+    "green": "#00A86B",
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "foreground": "#1F2937",
+    "border": "#E2E8F0",
+    "shadow": "rgb(15 23 42 / 0.28)"
+  }
+}

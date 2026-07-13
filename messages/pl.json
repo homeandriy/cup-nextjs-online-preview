@@ -99,7 +99,8 @@
     },
     "preview": {
       "title": "Podgląd 3D",
-      "description": "Obracaj kubek, aby sprawdzić, jak projekt układa się na jego powierzchni.",
+      "description": "Obróć kubek, aby go obejrzeć.",
+      "open": "Podgląd",
       "fullscreen": "Podgląd na całym ekranie",
       "close": "Zamknij"
     },

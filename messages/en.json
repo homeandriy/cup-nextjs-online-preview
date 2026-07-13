@@ -99,7 +99,8 @@
     },
     "preview": {
       "title": "3D preview",
-      "description": "Rotate the mug to inspect how the design wraps around the surface.",
+      "description": "Rotate the mug to view it.",
+      "open": "Preview",
       "fullscreen": "Fullscreen preview",
       "close": "Close"
     },

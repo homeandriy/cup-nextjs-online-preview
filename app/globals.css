@@ -11,32 +11,19 @@
 @import "@fontsource/roboto-slab/400.css";
 @import "tailwindcss";
 
-:root {
-  --background: #fffaf5;
-  --foreground: #1f2937;
-  --color-accent-50: #fff7ed;
-  --color-accent-100: #ffedd5;
-  --color-accent-300: #fdba74;
-  --color-accent-500: #f97316;
-  --color-accent-600: #ea580c;
-  --color-accent-700: #c2410c;
-}
-
 * {
   box-sizing: border-box;
 }
 
 html {
-  background: var(--background);
+  background: var(--color-background);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  color: var(--foreground);
-  background:
-    radial-gradient(circle at top, rgba(255, 237, 213, 0.9), transparent 38%),
-    linear-gradient(180deg, #fff7ed 0%, #ffffff 52%, #fffbeb 100%);
+  color: var(--color-foreground);
+  background: var(--color-background);
   font-family: 'Inter', 'Open Sans', Arial, Helvetica, sans-serif;
 }
 

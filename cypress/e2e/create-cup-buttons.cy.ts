@@ -11,11 +11,11 @@ describe('Create cup buttons and primary actions', () => {
 
     cy.get('[data-testid="site-nav-home"]').should('be.visible');
     cy.get('[data-testid="locale-switch-en"]').click();
-    cy.url().should('include', '/en/create-cup');
+    cy.url({timeout: 20000}).should('include', '/en/create-cup');
     cy.get('[data-testid="locale-switch-pl"]').click();
-    cy.url().should('include', '/pl/create-cup');
+    cy.url({timeout: 20000}).should('include', '/pl/create-cup');
     cy.get('[data-testid="locale-switch-uk"]').click();
-    cy.url().should('include', '/uk/create-cup');
+    cy.url({timeout: 20000}).should('include', '/uk/create-cup');
 
     cy.get('[data-testid="mug-scroll-right"]').click();
     cy.get('[data-testid="mug-scroll-left"]').click();

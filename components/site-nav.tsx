@@ -12,20 +12,21 @@ function switchLocale(pathname: string, locale: string) {
 }
 
 type SiteNavProps = {
-  current: 'home' | 'create-cup';
+  current?: 'home' | 'create-cup';
 };
 
 export function SiteNav({current}: SiteNavProps) {
   const t = useTranslations('Navigation');
   const locale = useLocale();
   const pathname = usePathname();
+  const activePage = current ?? (pathname.includes('/create-cup') ? 'create-cup' : 'home');
 
   return (
-    <header className="rounded-[1.75rem] border border-orange-200/70 bg-white/85 px-5 py-4 shadow-[0_24px_60px_-40px_rgba(234,88,12,0.65)] backdrop-blur">
+    <header className="rounded-[1.75rem] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_48px_-30px_rgba(15,23,42,0.3)]">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-3">
           <Link
-            className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white"
+            className="rounded-full bg-[var(--color-orange)] px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_18px_-10px_rgba(15,23,42,0.55)]"
             data-testid="brand-home-link"
             href={`/${locale}`}
           >
@@ -33,10 +34,10 @@ export function SiteNav({current}: SiteNavProps) {
           </Link>
 
           <nav className="flex flex-wrap gap-2">
-            <NavLink active={current === 'home'} href={`/${locale}`} testId="site-nav-home">
+            <NavLink active={activePage === 'home'} href={`/${locale}`} testId="site-nav-home">
               {t('home')}
             </NavLink>
-            <NavLink active={current === 'create-cup'} href={`/${locale}/create-cup`} testId="site-nav-create-cup">
+            <NavLink active={activePage === 'create-cup'} href={`/${locale}/create-cup`} testId="site-nav-create-cup">
               {t('createCup')}
             </NavLink>
           </nav>
@@ -50,10 +51,10 @@ export function SiteNav({current}: SiteNavProps) {
               <Link
                 key={item}
                 className={[
-                  'rounded-full px-3 py-2 text-sm font-semibold transition',
+                  'rounded-full px-3 py-2 text-sm font-semibold',
                   isActive
-                    ? 'border border-orange-300 bg-orange-100 text-orange-700'
-                    : 'border border-orange-200 text-slate-700 hover:border-orange-300 hover:bg-orange-50'
+                    ? 'border-2 border-[var(--color-blue)] bg-[var(--color-blue)] text-white'
+                    : 'border border-slate-200 bg-white text-slate-700 hover:border-[var(--color-blue)] hover:text-[var(--color-blue)]'
                 ].join(' ')}
                 data-testid={`locale-switch-${item}`}
                 href={switchLocale(pathname, item)}
@@ -82,10 +83,10 @@ function NavLink({
   return (
     <Link
       className={[
-        'rounded-full px-4 py-2 text-sm font-semibold transition',
+        'rounded-full px-4 py-2 text-sm font-semibold',
         active
-          ? 'bg-orange-100 text-orange-700'
-          : 'text-slate-600 hover:bg-orange-50 hover:text-orange-700'
+          ? 'bg-[var(--color-blue)] text-white'
+          : 'text-slate-600 hover:bg-[var(--color-orange)] hover:text-white'
       ].join(' ')}
       data-testid={testId}
       href={href}

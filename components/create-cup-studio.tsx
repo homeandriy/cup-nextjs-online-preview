@@ -14,6 +14,7 @@ import {Suspense, useEffect, useId, useMemo, useRef, useState} from 'react';
 import {
   Image as KonvaImage,
   Layer,
+  Line,
   Rect,
   Stage,
   Text as KonvaText,
@@ -25,13 +26,17 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import useImage from 'use-image';
 
-import {SiteNav} from '@/components/site-nav';
 import {useAppStore} from '@/components/providers/app-store-provider';
+import theme from '@/theme.json';
 
 const PRINT_DPI = 300;
 const EDITOR_DPI = 90;
 const MILLIMETERS_IN_INCH = 25.4;
-const DEFAULT_TEXT_COLOR = '#1f2937';
+const SNAP_DISTANCE = 12;
+const GUIDE_MIN_DISTANCE = 3;
+const MAX_VERTICAL_GUIDES = 100;
+const MAX_HORIZONTAL_GUIDES = 20;
+const DEFAULT_TEXT_COLOR = theme.colors.foreground;
 
 export type MugType = 'classic11oz' | 'rimRed' | 'large15oz' | 'spoonHandle';
 type MugModelFormat = 'glb' | 'gltf' | 'fbx' | 'obj';
@@ -121,7 +126,7 @@ const MUG_SPECS: MugSpec[] = [
     templateWidthMm: 210,
     templateHeightMm: 90,
     handleSafeZoneMm: 10,
-    bodyColor: '#fffdf8',
+    bodyColor: theme.colors.surface,
     bodyHeight: 2.35,
     radiusTop: 1.23,
     radiusBottom: 1.16,
@@ -135,8 +140,8 @@ const MUG_SPECS: MugSpec[] = [
     templateWidthMm: 210,
     templateHeightMm: 90,
     handleSafeZoneMm: 10,
-    bodyColor: '#fffdf8',
-    accentColor: '#dc2626',
+    bodyColor: theme.colors.surface,
+    accentColor: theme.colors.orange,
     bodyHeight: 2.35,
     radiusTop: 1.23,
     radiusBottom: 1.16,
@@ -150,7 +155,7 @@ const MUG_SPECS: MugSpec[] = [
     templateWidthMm: 230,
     templateHeightMm: 100,
     handleSafeZoneMm: 10,
-    bodyColor: '#fffaf0',
+    bodyColor: theme.colors.surface,
     bodyHeight: 2.7,
     radiusTop: 1.34,
     radiusBottom: 1.26,
@@ -164,8 +169,8 @@ const MUG_SPECS: MugSpec[] = [
     templateWidthMm: 205,
     templateHeightMm: 92,
     handleSafeZoneMm: 10,
-    bodyColor: '#fffbf5',
-    accentColor: '#f59e0b',
+    bodyColor: theme.colors.surface,
+    accentColor: theme.colors.blue,
     bodyHeight: 2.42,
     radiusTop: 1.24,
     radiusBottom: 1.18,
@@ -254,6 +259,68 @@ function normalizeLayerPositionForDimensions(
   };
 }
 
+function snapLayerPositionForDimensions(
+  layer: DesignLayer,
+  stageWidth: number,
+  stageHeight: number,
+  safeZoneWidth: number,
+  disableSnap: boolean
+): DesignLayer {
+  const normalizedLayer = normalizeLayerPositionForDimensions(layer, stageWidth, stageHeight, safeZoneWidth);
+
+  if (disableSnap) {
+    return normalizedLayer;
+  }
+
+  const minX = safeZoneWidth;
+  const maxX = Math.max(safeZoneWidth, stageWidth - safeZoneWidth - normalizedLayer.width);
+  const minY = 0;
+  const maxY = Math.max(0, stageHeight - normalizedLayer.height);
+  const x = Math.abs(normalizedLayer.x - minX) <= SNAP_DISTANCE
+    ? minX
+    : Math.abs(normalizedLayer.x - maxX) <= SNAP_DISTANCE
+      ? maxX
+      : normalizedLayer.x;
+  const y = Math.abs(normalizedLayer.y - minY) <= SNAP_DISTANCE
+    ? minY
+    : Math.abs(normalizedLayer.y - maxY) <= SNAP_DISTANCE
+      ? maxY
+      : normalizedLayer.y;
+
+  return {...normalizedLayer, x, y};
+}
+
+function snapLayerToGuides(
+  layer: DesignLayer,
+  verticalGuideX: number[],
+  horizontalGuideY: number[]
+): DesignLayer {
+  function snapAxis(position: number, size: number, guides: number[]) {
+    if (guides.length === 0) {
+      return position;
+    }
+
+    const offsets = [0, size / 2, size];
+    const candidates = guides.flatMap((guide) => offsets.map((offset) => ({guide, offset})));
+    const nearest = candidates.reduce((current, candidate) =>
+      Math.abs(candidate.guide - (position + candidate.offset)) <
+      Math.abs(current.guide - (position + current.offset))
+        ? candidate
+        : current
+    );
+
+    return Math.abs(nearest.guide - (position + nearest.offset)) <= SNAP_DISTANCE
+      ? nearest.guide - nearest.offset
+      : position;
+  }
+
+  return {
+    ...layer,
+    x: snapAxis(layer.x, layer.width, verticalGuideX),
+    y: snapAxis(layer.y, layer.height, horizontalGuideY)
+  };
+}
+
 export function CreateCupStudio() {
   const t = useTranslations('CreateCupPage');
   const locale = useLocale();
@@ -272,6 +339,9 @@ export function CreateCupStudio() {
   const [previewTextureUrl, setPreviewTextureUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const [isCopyMenuOpen, setIsCopyMenuOpen] = useState(false);
+  const [horizontalGuides, setHorizontalGuides] = useState<number[]>([]);
+  const [verticalGuides, setVerticalGuides] = useState<number[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const spec = getSpec(mugType);
@@ -359,6 +429,99 @@ export function CreateCupStudio() {
         layer.id === layerId ? normalizeLayerPosition({...layer, ...patch} as DesignLayer) : layer
       )
     );
+  }
+
+
+  function duplicateLayer(layer: DesignLayer) {
+    const nextLayer = normalizeLayerPosition({
+      ...layer,
+      id: layer.id + '-copy-' + layers.length,
+      name: layer.name + ' — копія',
+      x: Math.round(safeZoneWidth + (stageWidth - safeZoneWidth * 2 - layer.width) / 2),
+      y: Math.round((stageHeight - layer.height) / 2)
+    });
+
+    setLayers((current) => [...current, nextLayer]);
+    setSelectedLayerId(nextLayer.id);
+    setIsCopyMenuOpen(false);
+    setStatusMessage(null);
+  }
+
+  function handleLayerDragMove(layer: DesignLayer, event: KonvaEventObject<DragEvent>) {
+    if (event.evt.ctrlKey) {
+      return;
+    }
+
+    const boundedLayer = snapLayerPositionForDimensions(
+      {...layer, x: event.target.x(), y: event.target.y()},
+      stageWidth,
+      stageHeight,
+      safeZoneWidth,
+      false
+    );
+    const nextLayer = event.evt.altKey
+      ? snapLayerToGuides(boundedLayer, verticalGuides, horizontalGuides)
+      : boundedLayer;
+
+    event.target.position({x: nextLayer.x, y: nextLayer.y});
+  }
+
+  function handleLayerDragEnd(layer: DesignLayer, event: KonvaEventObject<DragEvent>) {
+    const boundedLayer = snapLayerPositionForDimensions(
+      {...layer, x: event.target.x(), y: event.target.y()},
+      stageWidth,
+      stageHeight,
+      safeZoneWidth,
+      event.evt.ctrlKey
+    );
+    const nextLayer = !event.evt.ctrlKey && event.evt.altKey
+      ? snapLayerToGuides(boundedLayer, verticalGuides, horizontalGuides)
+      : boundedLayer;
+
+    updateLayer(layer.id, {x: nextLayer.x, y: nextLayer.y});
+  }
+
+
+  function findNextGuidePosition(guides: number[], min: number, max: number, limit: number) {
+    if (guides.length >= limit) {
+      return null;
+    }
+
+    const step = (max - min) / (limit + 1);
+    const indexes = Array.from({length: limit}, (_, index) => index).sort(
+      (left, right) => Math.abs(left - (limit - 1) / 2) - Math.abs(right - (limit - 1) / 2)
+    );
+
+    return indexes
+      .map((index) => Math.round(min + (index + 1) * step))
+      .find((position) => guides.every((guide) => Math.abs(guide - position) > GUIDE_MIN_DISTANCE)) ?? null;
+  }
+
+  function addHorizontalGuide() {
+    setHorizontalGuides((current) => {
+      const position = findNextGuidePosition(current, 0, stageHeight, MAX_HORIZONTAL_GUIDES);
+      return position === null ? current : [...current, position];
+    });
+  }
+
+  function addVerticalGuide() {
+    setVerticalGuides((current) => {
+      const position = findNextGuidePosition(
+        current,
+        safeZoneWidth,
+        stageWidth - safeZoneWidth,
+        MAX_VERTICAL_GUIDES
+      );
+      return position === null ? current : [...current, position];
+    });
+  }
+
+  function updateHorizontalGuide(index: number, position: number) {
+    setHorizontalGuides((current) => current.map((guide, guideIndex) => guideIndex === index ? position : guide));
+  }
+
+  function updateVerticalGuide(index: number, position: number) {
+    setVerticalGuides((current) => current.map((guide, guideIndex) => guideIndex === index ? position : guide));
   }
 
   function moveLayer(layerId: string, direction: 'up' | 'down') {
@@ -595,23 +758,20 @@ export function CreateCupStudio() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <SiteNav current="create-cup" />
-
-        <section className="rounded-[2rem] border border-orange-200/70 bg-white/90 p-4 shadow-[0_30px_80px_-45px_rgba(234,88,12,0.65)] backdrop-blur sm:p-6 lg:p-8">
+    <div className="text-slate-900">
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-[0_24px_60px_-32px_rgba(15,23,42,0.32)] sm:p-6 lg:p-8">
           <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_320px] 2xl:items-start">
             <section className="min-w-0 space-y-4">
-              <header className="flex flex-col gap-5 rounded-[1.75rem] border border-orange-100 bg-[linear-gradient(135deg,_rgba(255,247,237,0.96),_rgba(255,255,255,0.96))] p-5 lg:flex-row lg:items-end lg:justify-between">
+              <header className="flex flex-col gap-5 rounded-[1.75rem] border border-slate-200 bg-white shadow-[0_12px_28px_-22px_rgba(15,23,42,0.3)] p-5 lg:flex-row lg:items-end lg:justify-between">
                 <div className="max-w-3xl space-y-3">
-                  <p className="text-sm font-semibold uppercase tracking-[0.32em] text-orange-600">
+                  <p className="text-sm font-semibold uppercase tracking-[0.32em] text-[var(--color-orange)]">
                     {t('eyebrow')}
                   </p>
                   <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{t('title')}</h1>
                   <p className="text-sm leading-7 text-slate-600">{t('description')}</p>
                 </div>
 
-                <div className="grid gap-2 rounded-[1.25rem] border border-orange-100 bg-white/80 p-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-2">
+                <div className="grid gap-2 rounded-[1.25rem] border border-slate-200 bg-white/80 p-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-2">
                   <SpecRow label={t('printSpec.template')} value={`${spec.templateWidthMm} × ${spec.templateHeightMm} mm`} />
                   <SpecRow label={t('printSpec.printable')} value={`${spec.templateWidthMm - spec.handleSafeZoneMm * 2} × ${spec.templateHeightMm} mm`} />
                   <SpecRow label={t('printSpec.margin')} value={`${spec.handleSafeZoneMm} mm`} />
@@ -619,18 +779,18 @@ export function CreateCupStudio() {
                 </div>
               </header>
 
-              <div className="space-y-3 rounded-[1.75rem] border border-orange-100 bg-white p-4">
+              <div className="space-y-3 rounded-[1.75rem] border border-slate-200 bg-white p-4 shadow-[0_16px_38px_-28px_rgba(15,23,42,0.28)]">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
                     {t('mugSelectorLabel')}
                   </h2>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-600">
+                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--color-orange)]">
                       {spec.capacityLabel}
                     </span>
                     <button
                       aria-label="Previous mug type"
-                      className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-200 bg-white text-lg font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                      className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold text-slate-700 hover:border-[var(--color-blue)] hover:bg-white"
                       data-testid="mug-scroll-left"
                       onClick={() => scrollMugList('left')}
                       type="button"
@@ -639,7 +799,7 @@ export function CreateCupStudio() {
                     </button>
                     <button
                       aria-label="Next mug type"
-                      className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-200 bg-white text-lg font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                      className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold text-slate-700 hover:border-[var(--color-blue)] hover:bg-white"
                       data-testid="mug-scroll-right"
                       onClick={() => scrollMugList('right')}
                       type="button"
@@ -656,10 +816,10 @@ export function CreateCupStudio() {
                       <button
                         key={item.id}
                         className={[
-                          'min-w-[220px] flex-1 rounded-[1.4rem] border p-4 text-left transition lg:min-w-[260px]',
+                          'min-w-[220px] flex-1 rounded-[1.4rem] border p-4 text-left lg:min-w-[260px]',
                           isActive
-                            ? 'border-orange-400 bg-orange-50 shadow-[0_18px_40px_-36px_rgba(234,88,12,0.9)]'
-                            : 'border-orange-100 bg-white hover:border-orange-300 hover:bg-orange-50/60'
+                            ? 'border-[var(--color-blue)] bg-white shadow-[0_16px_38px_-26px_rgba(15,23,42,0.34)]'
+                            : 'border-slate-200 bg-white hover:border-[var(--color-blue)] hover:bg-white'
                         ].join(' ')}
                         data-testid={`mug-option-${item.id}`}
                         onClick={() => chooseMugType(item.id)}
@@ -697,7 +857,7 @@ export function CreateCupStudio() {
                     type="file"
                   />
                   <button
-                    className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600"
+                    className="rounded-full bg-[var(--color-orange)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-blue)]"
                     data-testid="add-image-button"
                     onClick={() => document.getElementById(inputId)?.click()}
                     type="button"
@@ -705,7 +865,7 @@ export function CreateCupStudio() {
                     {t('editor.addLayer')}
                   </button>
                   <button
-                    className="rounded-full border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[var(--color-blue)] hover:bg-white"
                     data-testid="add-text-button"
                     onClick={addTextLayer}
                     type="button"
@@ -713,7 +873,7 @@ export function CreateCupStudio() {
                     {t('editor.addText')}
                   </button>
                   <button
-                    className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[var(--color-blue)] hover:bg-white"
                     data-testid="clear-design-button"
                     onClick={resetCanvas}
                     type="button"
@@ -723,10 +883,39 @@ export function CreateCupStudio() {
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-[1.75rem] border border-orange-100 bg-[#fffdf9]">
-                <div className="border-b border-orange-100 px-4 py-3 text-sm text-slate-600">{t('editor.canvasHelp')}</div>
+              <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-[0_16px_38px_-28px_rgba(15,23,42,0.28)]">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 text-sm text-slate-600">
+                  <div className="space-y-1">
+                    <p>{t('editor.canvasHelp')}</p>
+                    <p className="text-xs text-slate-500">
+                      Зображення й написи прилипають до напрямних, коли утримуєте Alt. Щоб пересунути напрямну, наведіть курсор на пунктирну лінію та потягніть її.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-full border border-[var(--color-green)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--color-green)] hover:bg-[var(--color-green)] hover:text-white"
+                      data-testid="add-horizontal-guide-button"
+                      onClick={addHorizontalGuide}
+                      type="button"
+                    >
+                      Додати горизонтальні направляючі
+                    </button>
+                    <button
+                      className="rounded-full border border-[var(--color-green)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--color-green)] hover:bg-[var(--color-green)] hover:text-white"
+                      data-testid="add-vertical-guide-button"
+                      onClick={addVerticalGuide}
+                      type="button"
+                    >
+                      Додати вертикальні направляючі
+                    </button>
+                  </div>
+                </div>
                 <div className="overflow-auto p-3 sm:p-4" data-testid="stage-scroll-container">
-                  <div className="inline-block rounded-[1.5rem] border border-dashed border-orange-200 bg-white p-2 sm:p-4" data-testid="stage-wrapper">
+                  <div className="inline-block rounded-[1.5rem] border border-dashed border-slate-200 bg-white p-2 sm:p-4" data-testid="stage-wrapper">
+                    <div className="flex items-start gap-2">
+                      <Ruler length={stageHeight} millimeters={spec.templateHeightMm} orientation="vertical" />
+                      <div>
+                        <Ruler length={stageWidth} millimeters={spec.templateWidthMm} orientation="horizontal" />
                     <Stage
                       data-testid="design-stage"
                       height={stageHeight}
@@ -739,9 +928,49 @@ export function CreateCupStudio() {
                       width={stageWidth}
                     >
                       <Layer listening={false}>
-                        <Rect fill="#fffdf8" height={stageHeight} stroke="#fed7aa" strokeWidth={2} width={stageWidth} />
+                        <Rect fill={theme.colors.surface} height={stageHeight} stroke={theme.colors.blue} strokeWidth={2} width={stageWidth} />
                         <Rect fill="rgba(148, 163, 184, 0.14)" height={stageHeight} width={safeZoneWidth} x={0} y={0} />
                         <Rect fill="rgba(148, 163, 184, 0.14)" height={stageHeight} width={safeZoneWidth} x={stageWidth - safeZoneWidth} y={0} />
+                      </Layer>
+                      <Layer>
+                        {horizontalGuides.map((guideY, index) => (
+                          <Line
+                            dash={[8, 6]}
+                            dragBoundFunc={(position) => ({x: 0, y: Math.min(Math.max(position.y, 0), stageHeight)})}
+                            draggable
+                            hitStrokeWidth={28}
+                            key={`horizontal-guide-${index}`}
+                            onDragEnd={(event) => {
+                              updateHorizontalGuide(index, event.target.y());
+                              event.target.getStage()?.container().style.setProperty('cursor', 'default');
+                            }}
+                            onMouseEnter={(event) => event.target.getStage()?.container().style.setProperty('cursor', 'ns-resize')}
+                            onMouseLeave={(event) => event.target.getStage()?.container().style.setProperty('cursor', 'default')}
+                            points={[safeZoneWidth, 0, stageWidth - safeZoneWidth, 0]}
+                            stroke={theme.colors.green}
+                            strokeWidth={1}
+                            y={guideY}
+                          />
+                        ))}
+                        {verticalGuides.map((guideX, index) => (
+                          <Line
+                            dash={[8, 6]}
+                            dragBoundFunc={(position) => ({x: Math.min(Math.max(position.x, safeZoneWidth), stageWidth - safeZoneWidth), y: 0})}
+                            draggable
+                            hitStrokeWidth={28}
+                            key={`vertical-guide-${index}`}
+                            onDragEnd={(event) => {
+                              updateVerticalGuide(index, event.target.x());
+                              event.target.getStage()?.container().style.setProperty('cursor', 'default');
+                            }}
+                            onMouseEnter={(event) => event.target.getStage()?.container().style.setProperty('cursor', 'ew-resize')}
+                            onMouseLeave={(event) => event.target.getStage()?.container().style.setProperty('cursor', 'default')}
+                            points={[0, 0, 0, stageHeight]}
+                            stroke={theme.colors.green}
+                            strokeWidth={1}
+                            x={guideX}
+                          />
+                        ))}
                       </Layer>
                       <Layer ref={designLayerRef}>
                         {layers.map((layer) =>
@@ -751,6 +980,8 @@ export function CreateCupStudio() {
                               key={layer.id}
                               layer={layer}
                               onChange={(patch) => updateLayer(layer.id, patch)}
+                              onDragEnd={(event) => handleLayerDragEnd(layer, event)}
+                              onDragMove={(event) => handleLayerDragMove(layer, event)}
                               onSelect={() => setSelectedLayerId(layer.id)}
                             />
                           ) : (
@@ -759,30 +990,34 @@ export function CreateCupStudio() {
                               key={layer.id}
                               layer={layer}
                               onChange={(patch) => updateLayer(layer.id, patch)}
+                              onDragEnd={(event) => handleLayerDragEnd(layer, event)}
+                              onDragMove={(event) => handleLayerDragMove(layer, event)}
                               onSelect={() => setSelectedLayerId(layer.id)}
                             />
                           )
                         )}
                       </Layer>
                     </Stage>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-[1.5rem] border border-orange-100 bg-white p-5">
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-[0_16px_38px_-28px_rgba(15,23,42,0.28)]">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h3 className="text-base font-semibold text-slate-900">{t('layers.title')}</h3>
                     <p className="text-sm text-slate-600">{t('layers.description')}</p>
                   </div>
-                  <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-orange-700" data-testid="layers-count">
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[var(--color-orange)]" data-testid="layers-count">
                     {t('layers.count', {count: layers.length})}
                   </span>
                 </div>
 
                 <div className="mt-4 grid gap-3" data-testid="design-layers">
                   {layers.length === 0 ? (
-                    <p className="rounded-[1.25rem] border border-dashed border-orange-200 px-4 py-5 text-sm text-slate-500" data-testid="layers-empty">
+                    <p className="rounded-[1.25rem] border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500" data-testid="layers-empty">
                       {t('layers.empty')}
                     </p>
                   ) : null}
@@ -793,11 +1028,11 @@ export function CreateCupStudio() {
                     return (
                       <button
                         className={[
-                          'cursor-grab rounded-[1.25rem] border px-4 py-3 text-left transition active:cursor-grabbing',
+                          'cursor-grab rounded-[1.25rem] border px-4 py-3 text-left active:cursor-grabbing',
                           draggedLayerId === layer.id ? 'opacity-50' : '',
                           isSelected
-                            ? 'border-orange-300 bg-orange-50'
-                            : 'border-orange-100 bg-white hover:border-orange-200 hover:bg-orange-50/40'
+                            ? 'border-[var(--color-blue)] bg-white'
+                            : 'border-slate-200 bg-white hover:border-slate-200 hover:bg-white'
                         ].join(' ')}
                         aria-grabbed={draggedLayerId === layer.id}
                         data-layer-type={layer.type}
@@ -842,13 +1077,13 @@ export function CreateCupStudio() {
                 </div>
 
                 {selectedLayer ? (
-                  <div className="mt-5 grid gap-4 rounded-[1.25rem] border border-orange-100 bg-orange-50/50 p-4" data-testid="layer-inspector">
+                  <div className="mt-5 grid gap-4 rounded-[1.25rem] border border-slate-200 bg-white p-4" data-testid="layer-inspector">
                     {selectedLayer.type === 'text' ? (
                       <>
                         <label className="grid gap-2 text-sm text-slate-700">
                           <span className="font-medium">{t('inspector.text')}</span>
                           <textarea
-                            className="min-h-24 rounded-[1rem] border border-orange-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-orange-400"
+                            className="min-h-24 rounded-[1rem] border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-blue)]"
                             data-testid="text-layer-content"
                             onChange={(event) =>
                               updateLayer(selectedLayer.id, {
@@ -864,7 +1099,7 @@ export function CreateCupStudio() {
                           <label className="grid gap-2 text-sm text-slate-700">
                             <span className="font-medium">{t('inspector.font')}</span>
                             <select
-                              className="rounded-[1rem] border border-orange-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-orange-400"
+                              className="rounded-[1rem] border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-blue)]"
                               data-testid="text-layer-font"
                               onChange={(event) => updateLayer(selectedLayer.id, {fontFamily: event.target.value} as Partial<DesignLayer>)}
                               value={selectedLayer.fontFamily}
@@ -877,7 +1112,7 @@ export function CreateCupStudio() {
                           <label className="grid gap-2 text-sm text-slate-700">
                             <span className="font-medium">{t('inspector.color')}</span>
                             <input
-                              className="h-12 w-full rounded-[1rem] border border-orange-200 bg-white px-2 py-2"
+                              className="h-12 w-full rounded-[1rem] border border-slate-200 bg-white px-2 py-2"
                               data-testid="text-layer-color"
                               onChange={(event) => updateLayer(selectedLayer.id, {fill: event.target.value} as Partial<DesignLayer>)}
                               type="color"
@@ -900,7 +1135,7 @@ export function CreateCupStudio() {
                     <label className="grid gap-2 text-sm text-slate-700">
                       <span className="font-medium">Режим змішування</span>
                       <select
-                        className="rounded-[1rem] border border-orange-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-orange-400"
+                        className="rounded-[1rem] border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-blue)]"
                         data-testid="layer-blend-mode"
                         onChange={(event) => updateLayer(selectedLayer.id, {blendMode: event.target.value as BlendMode})}
                         value={selectedLayer.blendMode}
@@ -913,6 +1148,38 @@ export function CreateCupStudio() {
                     <RangeField label={t('inspector.opacity')} max={1} min={0.1} onChange={(value) => updateLayer(selectedLayer.id, {opacity: value})} step={0.05} testId="layer-opacity" value={selectedLayer.opacity} />
                     <RangeField label={t('inspector.rotation')} max={180} min={-180} onChange={(value) => updateLayer(selectedLayer.id, {rotation: value})} step={1} testId="layer-rotation" value={selectedLayer.rotation} />
                     <div className="flex flex-wrap gap-2">
+                      <div className="relative inline-flex">
+                        <button
+                          className="rounded-l-full border border-[var(--color-blue)] bg-white px-3 py-2 text-sm font-semibold text-[var(--color-blue)] hover:bg-[var(--color-blue)] hover:text-white"
+                          data-testid="copy-layer-button"
+                          onClick={() => duplicateLayer(selectedLayer)}
+                          type="button"
+                        >
+                          Копіювати шар
+                        </button>
+                        <button
+                          aria-expanded={isCopyMenuOpen}
+                          aria-label="Відкрити меню копіювання шару"
+                          className="rounded-r-full border border-l-0 border-[var(--color-blue)] bg-white px-3 py-2 text-sm font-semibold text-[var(--color-blue)] hover:bg-[var(--color-blue)] hover:text-white"
+                          data-testid="copy-layer-menu-button"
+                          onClick={() => setIsCopyMenuOpen((current) => !current)}
+                          type="button"
+                        >
+                          ↓
+                        </button>
+                        {isCopyMenuOpen ? (
+                          <div className="absolute left-0 top-full z-10 mt-2 w-72 rounded-[1rem] border border-slate-200 bg-white p-2 shadow-[0_16px_38px_-28px_rgba(15,23,42,0.34)]">
+                            <button
+                              className="w-full rounded-[0.75rem] px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-[var(--color-blue)] hover:text-white"
+                              data-testid="copy-layer-with-settings-button"
+                              onClick={() => duplicateLayer(selectedLayer)}
+                              type="button"
+                            >
+                              Копіювати шар з налаштуваннями
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                       <ActionButton label={t('inspector.layerUp')} onClick={() => moveLayer(selectedLayer.id, 'up')} testId="layer-up-button" />
                       <ActionButton label={t('inspector.layerDown')} onClick={() => moveLayer(selectedLayer.id, 'down')} testId="layer-down-button" />
                       <ActionButton destructive label={t('inspector.delete')} onClick={() => removeLayer(selectedLayer.id)} testId="layer-delete-button" />
@@ -923,26 +1190,21 @@ export function CreateCupStudio() {
             </section>
 
             <aside className="space-y-4 2xl:sticky 2xl:top-6">
-              <div className="rounded-[1.75rem] border border-orange-100 bg-white p-4 sm:p-5">
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-semibold text-slate-900">{t('preview.title')}</h2>
-                    <p className="text-sm text-slate-600">{t('preview.description')}</p>
-                  </div>
-                  <button
-                    className="rounded-full border border-orange-200 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700 transition hover:border-orange-300 hover:bg-orange-50 sm:text-xs"
-                    data-testid="preview-open-fullscreen"
-                    onClick={() => setIsPreviewFullscreen(true)}
-                    type="button"
-                  >
-                    {t('preview.fullscreen')}
-                  </button>
-                </div>
+              <div className="rounded-[1.75rem] border border-slate-200 bg-white p-4 shadow-[0_16px_38px_-28px_rgba(15,23,42,0.28)] sm:p-5">
+                <h2 className="mb-4 text-xl font-semibold text-slate-900">{t('preview.title')}</h2>
 
                 <PreviewCanvas spec={spec} textureUrl={previewTextureUrl} />
+                <button
+                  className="mt-4 w-full rounded-full border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-[var(--color-blue)] hover:bg-white"
+                  data-testid="preview-open-fullscreen"
+                  onClick={() => setIsPreviewFullscreen(true)}
+                  type="button"
+                >
+                  {t('preview.open')}
+                </button>
               </div>
 
-              <div className="rounded-[1.75rem] border border-orange-100 bg-slate-950 p-5 text-white">
+              <div className="rounded-[1.75rem] border border-slate-200 bg-slate-950 p-5 shadow-[0_16px_38px_-28px_rgba(15,23,42,0.4)] text-white">
                 <h2 className="text-lg font-semibold">{t('sendBox.title')}</h2>
                 <p className="mt-2 text-sm leading-7 text-slate-300">{t('sendBox.description')}</p>
                 <ul className="mt-4 space-y-2 text-sm text-slate-300">
@@ -951,7 +1213,7 @@ export function CreateCupStudio() {
                   <li>{t('sendBox.points.format')}</li>
                 </ul>
                 <button
-                  className="mt-5 w-full rounded-full bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-orange-300"
+                  className="mt-5 w-full rounded-full bg-[var(--color-green)] px-5 py-3 text-sm font-semibold text-white hover:bg-[var(--color-blue)] disabled:cursor-not-allowed disabled:bg-slate-300"
                   data-testid="send-to-print-button"
                   disabled={layers.length === 0 || isSubmitting}
                   onClick={submitToPrint}
@@ -967,8 +1229,7 @@ export function CreateCupStudio() {
               </div>
             </aside>
           </div>
-        </section>
-      </div>
+      </section>
 
       {isPreviewFullscreen ? (
         <div className="fixed inset-0 z-50 bg-slate-950/75 p-3 backdrop-blur-sm sm:p-6" data-testid="preview-modal">
@@ -979,7 +1240,7 @@ export function CreateCupStudio() {
                 <p className="mt-1 text-sm text-slate-600">{t('preview.description')}</p>
               </div>
               <button
-                className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[var(--color-blue)] hover:bg-white"
                 data-testid="preview-close-fullscreen"
                 onClick={() => setIsPreviewFullscreen(false)}
                 type="button"
@@ -994,7 +1255,7 @@ export function CreateCupStudio() {
           </div>
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }
 
@@ -1002,12 +1263,16 @@ function EditableImageLayer({
   layer,
   isSelected,
   onSelect,
-  onChange
+  onChange,
+  onDragMove,
+  onDragEnd
 }: {
   layer: ImageLayer;
   isSelected: boolean;
   onSelect: () => void;
   onChange: (patch: Partial<DesignLayer>) => void;
+  onDragMove: (event: KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (event: KonvaEventObject<DragEvent>) => void;
 }) {
   const [image] = useImage(layer.src, 'anonymous');
   const imageRef = useRef<KonvaImageNode | null>(null);
@@ -1030,9 +1295,8 @@ function EditableImageLayer({
         height={layer.height}
         image={image ?? undefined}
         onClick={onSelect}
-        onDragEnd={(event: KonvaEventObject<DragEvent>) => {
-          onChange({x: event.target.x(), y: event.target.y()});
-        }}
+        onDragEnd={onDragEnd}
+        onDragMove={onDragMove}
         onTap={onSelect}
         onTransformEnd={() => {
           const node = imageRef.current;
@@ -1065,10 +1329,10 @@ function EditableImageLayer({
       {isSelected ? (
         <Transformer
           anchorCornerRadius={999}
-          anchorFill="#f97316"
+          anchorFill={theme.colors.orange}
           anchorSize={11}
           borderDash={[4, 4]}
-          borderStroke="#ea580c"
+          borderStroke={theme.colors.orange}
           ref={transformerRef}
           rotateAnchorOffset={20}
         />
@@ -1081,12 +1345,16 @@ function EditableTextLayer({
   layer,
   isSelected,
   onSelect,
-  onChange
+  onChange,
+  onDragMove,
+  onDragEnd
 }: {
   layer: TextLayer;
   isSelected: boolean;
   onSelect: () => void;
   onChange: (patch: Partial<DesignLayer>) => void;
+  onDragMove: (event: KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (event: KonvaEventObject<DragEvent>) => void;
 }) {
   const textRef = useRef<KonvaTextNode | null>(null);
   const transformerRef = useRef<KonvaTransformer | null>(null);
@@ -1111,9 +1379,8 @@ function EditableTextLayer({
         globalCompositeOperation={layer.blendMode}
         height={layer.height}
         onClick={onSelect}
-        onDragEnd={(event: KonvaEventObject<DragEvent>) => {
-          onChange({x: event.target.x(), y: event.target.y()});
-        }}
+        onDragEnd={onDragEnd}
+        onDragMove={onDragMove}
         onTap={onSelect}
         onTransformEnd={() => {
           const node = textRef.current;
@@ -1151,10 +1418,10 @@ function EditableTextLayer({
       {isSelected ? (
         <Transformer
           anchorCornerRadius={999}
-          anchorFill="#f97316"
+          anchorFill={theme.colors.orange}
           anchorSize={11}
           borderDash={[4, 4]}
-          borderStroke="#ea580c"
+          borderStroke={theme.colors.orange}
           enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
           ref={transformerRef}
           rotateAnchorOffset={20}
@@ -1228,7 +1495,7 @@ function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
   const innerMaterial = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: '#fffefb',
+        color: theme.colors.surface,
         roughness: 0.45,
         metalness: 0.02,
         side: THREE.BackSide
@@ -1329,7 +1596,7 @@ function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
       ) : null}
       <mesh position={[0, -spec.bodyHeight / 2 - 1.28, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[2.8, 64]} />
-        <meshStandardMaterial color="#fed7aa" opacity={0.34} transparent />
+        <meshStandardMaterial color={theme.colors.border} />
       </mesh>
     </group>
   );
@@ -1481,7 +1748,7 @@ function applyTextureToMugModel(root: THREE.Object3D, texture: THREE.Texture | n
 
     const isBody = child === largestMesh;
     child.material = new THREE.MeshStandardMaterial({
-      color: isBody ? bodyColor : '#fffefb',
+      color: isBody ? bodyColor : theme.colors.surface,
       roughness: isBody ? 0.35 : 0.4,
       metalness: 0.04
     });
@@ -1638,7 +1905,7 @@ function PreviewCanvas({
   return (
     <div
       className={[
-        'overflow-hidden rounded-[1.5rem] border border-orange-100 bg-[radial-gradient(circle_at_top,_rgba(255,237,213,0.92),_transparent_50%),linear-gradient(180deg,_#fff7ed_0%,_#ffffff_100%)]',
+        'overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white',
         fullscreen ? 'flex h-full min-h-[60vh] flex-col' : ''
       ].join(' ')}
       data-testid={fullscreen ? 'preview-canvas-fullscreen' : 'preview-canvas'}
@@ -1730,10 +1997,10 @@ function ActionButton({
   return (
     <button
       className={[
-        'rounded-full px-3 py-2 text-sm font-semibold transition',
+        'rounded-full px-3 py-2 text-sm font-semibold',
         destructive
-          ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
-          : 'bg-white text-slate-700 hover:bg-orange-100'
+          ? 'border border-[var(--color-orange)] bg-white text-[var(--color-orange)] hover:bg-[var(--color-orange)] hover:text-white'
+          : 'bg-white text-slate-700 hover:bg-white'
       ].join(' ')}
       data-testid={testId}
       onClick={onClick}
@@ -1741,5 +2008,40 @@ function ActionButton({
     >
       {label}
     </button>
+  );
+}
+
+function Ruler({
+  orientation,
+  length,
+  millimeters
+}: {
+  orientation: 'horizontal' | 'vertical';
+  length: number;
+  millimeters: number;
+}) {
+  const marks = Array.from({length: Math.floor(millimeters / 10) + 1}, (_, index) => index * 10);
+  const isHorizontal = orientation === 'horizontal';
+
+  return (
+    <div
+      className={isHorizontal ? 'relative mb-1 h-5 border-b border-slate-300 text-[9px] text-slate-500' : 'relative mr-1 w-5 border-r border-slate-300 text-[9px] text-slate-500'}
+      data-testid={isHorizontal ? 'horizontal-ruler' : 'vertical-ruler'}
+      style={isHorizontal ? {width: length} : {height: length}}
+    >
+      {marks.map((mark) => {
+        const offset = (mark / millimeters) * 100;
+
+        return isHorizontal ? (
+          <span className="absolute bottom-0 h-2 border-l border-slate-400" key={mark} style={{left: offset + '%'}}>
+            <span className="absolute -left-1 -top-3">{mark}</span>
+          </span>
+        ) : (
+          <span className="absolute right-0 w-2 border-t border-slate-400" key={mark} style={{top: offset + '%'}}>
+            <span className="absolute -right-0 top-0 -translate-y-1/2 translate-x-full">{mark}</span>
+          </span>
+        );
+      })}
+    </div>
   );
 }
