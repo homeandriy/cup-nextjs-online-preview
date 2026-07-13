@@ -70,6 +70,7 @@
       "title": "Layer editor",
       "description": "Add one or more images and position them freely on the mug surface.",
       "addLayer": "Add layer",
+      "addText": "Add text",
       "clear": "Clear design",
       "canvasHelp": "The shaded strips show the handle zones that will not be printed.",
       "safeZoneLabel": "Handle safe zone",
@@ -79,9 +80,17 @@
       "title": "Design layers",
       "description": "Select a layer to move it on canvas or adjust its properties.",
       "count": "{count, plural, one {# layer} other {# layers}}",
-      "empty": "No artwork layers have been added yet."
+      "empty": "No design layers have been added yet.",
+      "kinds": {
+        "image": "Image",
+        "text": "Text"
+      }
     },
     "inspector": {
+      "text": "Text",
+      "font": "Font",
+      "fontSize": "Text size",
+      "color": "Text color",
       "opacity": "Opacity",
       "rotation": "Rotation",
       "layerUp": "Move layer up",

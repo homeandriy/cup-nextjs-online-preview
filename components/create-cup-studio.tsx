@@ -4,11 +4,19 @@ import {Canvas, useLoader} from '@react-three/fiber';
 import {Bounds, Environment, OrbitControls} from '@react-three/drei';
 import type {KonvaEventObject} from 'konva/lib/Node';
 import type {Image as KonvaImageNode} from 'konva/lib/shapes/Image';
+import type {Text as KonvaTextNode} from 'konva/lib/shapes/Text';
 import type {Stage as KonvaStage} from 'konva/lib/Stage';
 import type {Transformer as KonvaTransformer} from 'konva/lib/shapes/Transformer';
 import {useLocale, useTranslations} from 'next-intl';
 import {Suspense, useEffect, useId, useMemo, useRef, useState} from 'react';
-import {Image as KonvaImage, Layer, Rect, Stage, Text, Transformer} from 'react-konva';
+import {
+  Image as KonvaImage,
+  Layer,
+  Rect,
+  Stage,
+  Text as KonvaText,
+  Transformer
+} from 'react-konva';
 import * as THREE from 'three';
 import {FBXLoader} from 'three/addons/loaders/FBXLoader.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
@@ -20,8 +28,11 @@ import {SiteNav} from '@/components/site-nav';
 const PRINT_DPI = 300;
 const EDITOR_DPI = 120;
 const MILLIMETERS_IN_INCH = 25.4;
+const DEFAULT_TEXT_COLOR = '#1f2937';
 
 type MugType = 'classic11oz' | 'rimRed' | 'large15oz' | 'spoonHandle';
+type MugModelFormat = 'glb' | 'gltf' | 'fbx' | 'obj';
+type DesignLayerType = 'image' | 'text';
 
 type MugSpec = {
   id: MugType;
@@ -40,10 +51,10 @@ type MugSpec = {
   spoon?: boolean;
 };
 
-type DesignLayer = {
+type BaseLayer = {
   id: string;
+  type: DesignLayerType;
   name: string;
-  src: string;
   x: number;
   y: number;
   width: number;
@@ -52,7 +63,40 @@ type DesignLayer = {
   opacity: number;
 };
 
-type MugModelFormat = 'glb' | 'gltf' | 'fbx' | 'obj';
+type ImageLayer = BaseLayer & {
+  type: 'image';
+  src: string;
+};
+
+type TextLayer = BaseLayer & {
+  type: 'text';
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  fill: string;
+  align: 'left' | 'center' | 'right';
+};
+
+type DesignLayer = ImageLayer | TextLayer;
+
+type FontOption = {
+  id: string;
+  family: string;
+  label: string;
+};
+
+const FONT_OPTIONS: FontOption[] = [
+  {id: 'inter', family: 'Inter', label: 'Inter'},
+  {id: 'rubik', family: 'Rubik', label: 'Rubik'},
+  {id: 'nunito', family: 'Nunito', label: 'Nunito'},
+  {id: 'montserrat', family: 'Montserrat', label: 'Montserrat'},
+  {id: 'open-sans', family: 'Open Sans', label: 'Open Sans'},
+  {id: 'lora', family: 'Lora', label: 'Lora'},
+  {id: 'playfair-display', family: 'Playfair Display', label: 'Playfair Display'},
+  {id: 'oswald', family: 'Oswald', label: 'Oswald'},
+  {id: 'pt-serif', family: 'PT Serif', label: 'PT Serif'},
+  {id: 'roboto-slab', family: 'Roboto Slab', label: 'Roboto Slab'}
+];
 
 const MUG_SPECS: MugSpec[] = [
   {
@@ -162,11 +206,26 @@ function getSpec(mugType: MugType) {
   return MUG_SPECS.find((item) => item.id === mugType) ?? MUG_SPECS[0];
 }
 
+function getDefaultText(locale: string) {
+  if (locale === 'en') {
+    return 'Your custom mug';
+  }
+
+  if (locale === 'pl') {
+    return 'Twój własny kubek';
+  }
+
+  return 'Твоя власна кружка';
+}
+
+function getLayerKindLabel(t: ReturnType<typeof useTranslations>, layer: DesignLayer) {
+  return layer.type === 'text' ? t('layers.kinds.text') : t('layers.kinds.image');
+}
+
 export function CreateCupStudio() {
   const t = useTranslations('CreateCupPage');
   const locale = useLocale();
   const inputId = useId();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const stageRef = useRef<KonvaStage | null>(null);
   const mugListRef = useRef<HTMLDivElement | null>(null);
 
@@ -183,7 +242,6 @@ export function CreateCupStudio() {
   const stageHeight = mmToPixels(spec.templateHeightMm, EDITOR_DPI);
   const safeZoneWidth = mmToPixels(spec.handleSafeZoneMm, EDITOR_DPI);
   const exportScale = PRINT_DPI / EDITOR_DPI;
-
   const selectedLayer = layers.find((layer) => layer.id === selectedLayerId) ?? null;
 
   function normalizeLayerPosition(layer: DesignLayer): DesignLayer {
@@ -215,7 +273,7 @@ export function CreateCupStudio() {
           mimeType: 'image/png'
         })
       );
-    }, 60);
+    }, 80);
 
     return () => window.clearTimeout(timeoutId);
   }, [layers, mugType, stageHeight, stageWidth]);
@@ -238,7 +296,7 @@ export function CreateCupStudio() {
   function updateLayer(layerId: string, patch: Partial<DesignLayer>) {
     setLayers((current) =>
       current.map((layer) =>
-        layer.id === layerId ? normalizeLayerPosition({...layer, ...patch}) : layer
+        layer.id === layerId ? normalizeLayerPosition({...layer, ...patch} as DesignLayer) : layer
       )
     );
   }
@@ -296,8 +354,9 @@ export function CreateCupStudio() {
           const fitRatio = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
           const width = Math.round(image.width * fitRatio);
           const height = Math.round(image.height * fitRatio);
-          const nextLayer: DesignLayer = {
+          const nextLayer: ImageLayer = {
             id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'image',
             name: file.name,
             src: result,
             x: Math.round(safeZoneWidth + (stageWidth - safeZoneWidth * 2 - width) / 2),
@@ -317,6 +376,34 @@ export function CreateCupStudio() {
 
       reader.readAsDataURL(file);
     });
+  }
+
+  function addTextLayer() {
+    const defaultFont = FONT_OPTIONS[0]?.family ?? 'Inter';
+    const text = getDefaultText(locale);
+    const fontSize = 44;
+    const width = Math.max(240, stageWidth - safeZoneWidth * 2 - 48);
+    const height = Math.round(fontSize * 1.8);
+    const nextLayer: TextLayer = {
+      id: `${Date.now()}-text-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'text',
+      name: text,
+      text,
+      fontFamily: defaultFont,
+      fontSize,
+      fill: DEFAULT_TEXT_COLOR,
+      align: 'center',
+      x: Math.round(safeZoneWidth + (stageWidth - safeZoneWidth * 2 - width) / 2),
+      y: Math.round((stageHeight - height) / 2),
+      width,
+      height,
+      rotation: 0,
+      opacity: 1
+    };
+
+    setLayers((current) => [...current, normalizeLayerPosition(nextLayer)]);
+    setSelectedLayerId(nextLayer.id);
+    setStatusMessage(null);
   }
 
   async function submitToPrint() {
@@ -361,9 +448,7 @@ export function CreateCupStudio() {
 
       setStatusMessage(payload.message ?? t('status.success'));
     } catch (error) {
-      setStatusMessage(
-        error instanceof Error ? error.message : t('status.errorGeneric')
-      );
+      setStatusMessage(error instanceof Error ? error.message : t('status.errorGeneric'));
     } finally {
       setIsSubmitting(false);
     }
@@ -374,33 +459,22 @@ export function CreateCupStudio() {
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <SiteNav current="create-cup" />
 
-        <section className="rounded-[2rem] border border-orange-200/70 bg-white/90 p-6 shadow-[0_30px_80px_-45px_rgba(234,88,12,0.65)] backdrop-blur lg:p-8">
+        <section className="rounded-[2rem] border border-orange-200/70 bg-white/90 p-4 shadow-[0_30px_80px_-45px_rgba(234,88,12,0.65)] backdrop-blur sm:p-6 lg:p-8">
           <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_320px] 2xl:items-start">
-            <section className="space-y-4 min-w-0">
+            <section className="min-w-0 space-y-4">
               <header className="flex flex-col gap-5 rounded-[1.75rem] border border-orange-100 bg-[linear-gradient(135deg,_rgba(255,247,237,0.96),_rgba(255,255,255,0.96))] p-5 lg:flex-row lg:items-end lg:justify-between">
                 <div className="max-w-3xl space-y-3">
                   <p className="text-sm font-semibold uppercase tracking-[0.32em] text-orange-600">
                     {t('eyebrow')}
                   </p>
-                  <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                    {t('title')}
-                  </h1>
+                  <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{t('title')}</h1>
                   <p className="text-sm leading-7 text-slate-600">{t('description')}</p>
                 </div>
 
                 <div className="grid gap-2 rounded-[1.25rem] border border-orange-100 bg-white/80 p-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-2">
-                  <SpecRow
-                    label={t('printSpec.template')}
-                    value={`${spec.templateWidthMm} × ${spec.templateHeightMm} mm`}
-                  />
-                  <SpecRow
-                    label={t('printSpec.printable')}
-                    value={`${spec.templateWidthMm - spec.handleSafeZoneMm * 2} × ${spec.templateHeightMm} mm`}
-                  />
-                  <SpecRow
-                    label={t('printSpec.margin')}
-                    value={`${spec.handleSafeZoneMm} mm`}
-                  />
+                  <SpecRow label={t('printSpec.template')} value={`${spec.templateWidthMm} × ${spec.templateHeightMm} mm`} />
+                  <SpecRow label={t('printSpec.printable')} value={`${spec.templateWidthMm - spec.handleSafeZoneMm * 2} × ${spec.templateHeightMm} mm`} />
+                  <SpecRow label={t('printSpec.margin')} value={`${spec.handleSafeZoneMm} mm`} />
                   <SpecRow label={t('printSpec.dpi')} value={`${PRINT_DPI} DPI`} />
                 </div>
               </header>
@@ -417,6 +491,7 @@ export function CreateCupStudio() {
                     <button
                       aria-label="Previous mug type"
                       className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-200 bg-white text-lg font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                      data-testid="mug-scroll-left"
                       onClick={() => scrollMugList('left')}
                       type="button"
                     >
@@ -425,6 +500,7 @@ export function CreateCupStudio() {
                     <button
                       aria-label="Next mug type"
                       className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-200 bg-white text-lg font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                      data-testid="mug-scroll-right"
                       onClick={() => scrollMugList('right')}
                       type="button"
                     >
@@ -432,10 +508,7 @@ export function CreateCupStudio() {
                     </button>
                   </div>
                 </div>
-                <div
-                  className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                  ref={mugListRef}
-                >
+                <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" ref={mugListRef}>
                   {MUG_SPECS.map((item) => {
                     const isActive = item.id === spec.id;
 
@@ -443,25 +516,22 @@ export function CreateCupStudio() {
                       <button
                         key={item.id}
                         className={[
-                          'min-w-[240px] flex-1 rounded-[1.4rem] border p-4 text-left transition lg:min-w-[260px]',
+                          'min-w-[220px] flex-1 rounded-[1.4rem] border p-4 text-left transition lg:min-w-[260px]',
                           isActive
                             ? 'border-orange-400 bg-orange-50 shadow-[0_18px_40px_-36px_rgba(234,88,12,0.9)]'
                             : 'border-orange-100 bg-white hover:border-orange-300 hover:bg-orange-50/60'
                         ].join(' ')}
+                        data-testid={`mug-option-${item.id}`}
                         onClick={() => chooseMugType(item.id)}
                         type="button"
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <strong className="text-base text-slate-900">
-                            {t(`mugs.${item.titleKey}`)}
-                          </strong>
+                          <strong className="text-base text-slate-900">{t(`mugs.${item.titleKey}`)}</strong>
                           <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
                             {item.capacityLabel}
                           </span>
                         </div>
-                        <p className="mt-3 text-sm leading-6 text-slate-600">
-                          {t(`mugs.${item.summaryKey}`)}
-                        </p>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">{t(`mugs.${item.summaryKey}`)}</p>
                       </button>
                     );
                   })}
@@ -470,33 +540,41 @@ export function CreateCupStudio() {
 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-xl font-semibold text-slate-900">
-                    {t('editor.title')}
-                  </h2>
+                  <h2 className="text-xl font-semibold text-slate-900">{t('editor.title')}</h2>
                   <p className="text-sm text-slate-600">{t('editor.description')}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <input
                     accept="image/*"
                     className="hidden"
+                    data-testid="image-input"
                     id={inputId}
                     multiple
                     onChange={(event) => {
                       handleFilesUpload(event.target.files);
                       event.target.value = '';
                     }}
-                    ref={fileInputRef}
                     type="file"
                   />
                   <button
                     className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600"
-                    onClick={() => fileInputRef.current?.click()}
+                    data-testid="add-image-button"
+                    onClick={() => document.getElementById(inputId)?.click()}
                     type="button"
                   >
                     {t('editor.addLayer')}
                   </button>
                   <button
+                    className="rounded-full border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                    data-testid="add-text-button"
+                    onClick={addTextLayer}
+                    type="button"
+                  >
+                    {t('editor.addText')}
+                  </button>
+                  <button
                     className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                    data-testid="clear-design-button"
                     onClick={resetCanvas}
                     type="button"
                   >
@@ -506,12 +584,11 @@ export function CreateCupStudio() {
               </div>
 
               <div className="overflow-hidden rounded-[1.75rem] border border-orange-100 bg-[#fffdf9]">
-                <div className="border-b border-orange-100 px-4 py-3 text-sm text-slate-600">
-                  {t('editor.canvasHelp')}
-                </div>
-                <div className="overflow-x-auto p-4">
-                  <div className="inline-block rounded-[1.5rem] border border-dashed border-orange-200 bg-white p-4">
+                <div className="border-b border-orange-100 px-4 py-3 text-sm text-slate-600">{t('editor.canvasHelp')}</div>
+                <div className="overflow-auto p-3 sm:p-4" data-testid="stage-scroll-container">
+                  <div className="inline-block rounded-[1.5rem] border border-dashed border-orange-200 bg-white p-2 sm:p-4" data-testid="stage-wrapper">
                     <Stage
+                      data-testid="design-stage"
                       height={stageHeight}
                       onMouseDown={(event) => {
                         if (event.target === event.target.getStage()) {
@@ -522,51 +599,31 @@ export function CreateCupStudio() {
                       width={stageWidth}
                     >
                       <Layer>
-                        <Rect
-                          fill="#fffdf8"
-                          height={stageHeight}
-                          stroke="#fed7aa"
-                          strokeWidth={2}
-                          width={stageWidth}
-                        />
-                        <Rect
-                          fill="rgba(148, 163, 184, 0.14)"
-                          height={stageHeight}
-                          width={safeZoneWidth}
-                          x={0}
-                          y={0}
-                        />
-                        <Rect
-                          fill="rgba(148, 163, 184, 0.14)"
-                          height={stageHeight}
-                          width={safeZoneWidth}
-                          x={stageWidth - safeZoneWidth}
-                          y={0}
-                        />
-                        <Text
-                          fill="#ea580c"
-                          fontSize={22}
-                          text={t('editor.safeZoneLabel')}
-                          x={18}
-                          y={18}
-                        />
-                        <Text
-                          fill="#64748b"
-                          fontSize={18}
-                          text={t('editor.printableLabel')}
-                          x={safeZoneWidth + 16}
-                          y={18}
-                        />
+                        <Rect fill="#fffdf8" height={stageHeight} stroke="#fed7aa" strokeWidth={2} width={stageWidth} />
+                        <Rect fill="rgba(148, 163, 184, 0.14)" height={stageHeight} width={safeZoneWidth} x={0} y={0} />
+                        <Rect fill="rgba(148, 163, 184, 0.14)" height={stageHeight} width={safeZoneWidth} x={stageWidth - safeZoneWidth} y={0} />
+                        <KonvaText fill="#ea580c" fontSize={22} text={t('editor.safeZoneLabel')} x={18} y={18} />
+                        <KonvaText fill="#64748b" fontSize={18} text={t('editor.printableLabel')} x={safeZoneWidth + 16} y={18} />
 
-                        {layers.map((layer) => (
-                          <EditableImageLayer
-                            isSelected={layer.id === selectedLayerId}
-                            key={layer.id}
-                            layer={layer}
-                            onChange={(patch) => updateLayer(layer.id, patch)}
-                            onSelect={() => setSelectedLayerId(layer.id)}
-                          />
-                        ))}
+                        {layers.map((layer) =>
+                          layer.type === 'image' ? (
+                            <EditableImageLayer
+                              isSelected={layer.id === selectedLayerId}
+                              key={layer.id}
+                              layer={layer}
+                              onChange={(patch) => updateLayer(layer.id, patch)}
+                              onSelect={() => setSelectedLayerId(layer.id)}
+                            />
+                          ) : (
+                            <EditableTextLayer
+                              isSelected={layer.id === selectedLayerId}
+                              key={layer.id}
+                              layer={layer}
+                              onChange={(patch) => updateLayer(layer.id, patch)}
+                              onSelect={() => setSelectedLayerId(layer.id)}
+                            />
+                          )
+                        )}
                       </Layer>
                     </Stage>
                   </div>
@@ -574,21 +631,19 @@ export function CreateCupStudio() {
               </div>
 
               <div className="rounded-[1.5rem] border border-orange-100 bg-white p-5">
-                <div className="flex items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-base font-semibold text-slate-900">
-                      {t('layers.title')}
-                    </h3>
+                    <h3 className="text-base font-semibold text-slate-900">{t('layers.title')}</h3>
                     <p className="text-sm text-slate-600">{t('layers.description')}</p>
                   </div>
-                  <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-orange-700">
+                  <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-orange-700" data-testid="layers-count">
                     {t('layers.count', {count: layers.length})}
                   </span>
                 </div>
 
-                <div className="mt-4 grid gap-3">
+                <div className="mt-4 grid gap-3" data-testid="design-layers">
                   {layers.length === 0 ? (
-                    <p className="rounded-[1.25rem] border border-dashed border-orange-200 px-4 py-5 text-sm text-slate-500">
+                    <p className="rounded-[1.25rem] border border-dashed border-orange-200 px-4 py-5 text-sm text-slate-500" data-testid="layers-empty">
                       {t('layers.empty')}
                     </p>
                   ) : null}
@@ -604,58 +659,87 @@ export function CreateCupStudio() {
                             ? 'border-orange-300 bg-orange-50'
                             : 'border-orange-100 bg-white hover:border-orange-200 hover:bg-orange-50/40'
                         ].join(' ')}
+                        data-layer-type={layer.type}
+                        data-testid={`layer-item-${index}`}
                         key={layer.id}
                         onClick={() => setSelectedLayerId(layer.id)}
                         type="button"
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <strong className="truncate text-sm text-slate-900">
-                            {layer.name}
-                          </strong>
-                          <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                            #{index + 1}
-                          </span>
+                          <strong className="truncate text-sm text-slate-900">{layer.name}</strong>
+                          <span className="text-xs uppercase tracking-[0.2em] text-slate-400">#{index + 1}</span>
                         </div>
-                        <p className="mt-2 text-xs text-slate-500">
-                          {Math.round(layer.width)} × {Math.round(layer.height)} px
-                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-700">{getLayerKindLabel(t, layer)}</span>
+                          <span>{Math.round(layer.width)} × {Math.round(layer.height)} px</span>
+                        </div>
                       </button>
                     );
                   })}
                 </div>
 
                 {selectedLayer ? (
-                  <div className="mt-5 grid gap-4 rounded-[1.25rem] border border-orange-100 bg-orange-50/50 p-4">
-                    <RangeField
-                      label={t('inspector.opacity')}
-                      max={1}
-                      min={0.1}
-                      onChange={(value) => updateLayer(selectedLayer.id, {opacity: value})}
-                      step={0.05}
-                      value={selectedLayer.opacity}
-                    />
-                    <RangeField
-                      label={t('inspector.rotation')}
-                      max={180}
-                      min={-180}
-                      onChange={(value) => updateLayer(selectedLayer.id, {rotation: value})}
-                      step={1}
-                      value={selectedLayer.rotation}
-                    />
+                  <div className="mt-5 grid gap-4 rounded-[1.25rem] border border-orange-100 bg-orange-50/50 p-4" data-testid="layer-inspector">
+                    {selectedLayer.type === 'text' ? (
+                      <>
+                        <label className="grid gap-2 text-sm text-slate-700">
+                          <span className="font-medium">{t('inspector.text')}</span>
+                          <textarea
+                            className="min-h-24 rounded-[1rem] border border-orange-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-orange-400"
+                            data-testid="text-layer-content"
+                            onChange={(event) =>
+                              updateLayer(selectedLayer.id, {
+                                text: event.target.value,
+                                name: event.target.value.slice(0, 42) || t('layers.kinds.text'),
+                                height: Math.max(selectedLayer.fontSize * 1.7, selectedLayer.height)
+                              } as Partial<DesignLayer>)
+                            }
+                            value={selectedLayer.text}
+                          />
+                        </label>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <label className="grid gap-2 text-sm text-slate-700">
+                            <span className="font-medium">{t('inspector.font')}</span>
+                            <select
+                              className="rounded-[1rem] border border-orange-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-orange-400"
+                              data-testid="text-layer-font"
+                              onChange={(event) => updateLayer(selectedLayer.id, {fontFamily: event.target.value} as Partial<DesignLayer>)}
+                              value={selectedLayer.fontFamily}
+                            >
+                              {FONT_OPTIONS.map((font) => (
+                                <option key={font.id} value={font.family}>{font.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="grid gap-2 text-sm text-slate-700">
+                            <span className="font-medium">{t('inspector.color')}</span>
+                            <input
+                              className="h-12 w-full rounded-[1rem] border border-orange-200 bg-white px-2 py-2"
+                              data-testid="text-layer-color"
+                              onChange={(event) => updateLayer(selectedLayer.id, {fill: event.target.value} as Partial<DesignLayer>)}
+                              type="color"
+                              value={selectedLayer.fill}
+                            />
+                          </label>
+                        </div>
+                        <RangeField
+                          label={t('inspector.fontSize')}
+                          max={96}
+                          min={18}
+                          onChange={(value) => updateLayer(selectedLayer.id, {fontSize: value, height: value * 1.8} as Partial<DesignLayer>)}
+                          step={1}
+                          testId="text-layer-font-size"
+                          value={selectedLayer.fontSize}
+                        />
+                      </>
+                    ) : null}
+
+                    <RangeField label={t('inspector.opacity')} max={1} min={0.1} onChange={(value) => updateLayer(selectedLayer.id, {opacity: value})} step={0.05} testId="layer-opacity" value={selectedLayer.opacity} />
+                    <RangeField label={t('inspector.rotation')} max={180} min={-180} onChange={(value) => updateLayer(selectedLayer.id, {rotation: value})} step={1} testId="layer-rotation" value={selectedLayer.rotation} />
                     <div className="flex flex-wrap gap-2">
-                      <ActionButton
-                        label={t('inspector.layerUp')}
-                        onClick={() => moveLayer(selectedLayer.id, 'up')}
-                      />
-                      <ActionButton
-                        label={t('inspector.layerDown')}
-                        onClick={() => moveLayer(selectedLayer.id, 'down')}
-                      />
-                      <ActionButton
-                        destructive
-                        label={t('inspector.delete')}
-                        onClick={() => removeLayer(selectedLayer.id)}
-                      />
+                      <ActionButton label={t('inspector.layerUp')} onClick={() => moveLayer(selectedLayer.id, 'up')} testId="layer-up-button" />
+                      <ActionButton label={t('inspector.layerDown')} onClick={() => moveLayer(selectedLayer.id, 'down')} testId="layer-down-button" />
+                      <ActionButton destructive label={t('inspector.delete')} onClick={() => removeLayer(selectedLayer.id)} testId="layer-delete-button" />
                     </div>
                   </div>
                 ) : null}
@@ -663,16 +747,15 @@ export function CreateCupStudio() {
             </section>
 
             <aside className="space-y-4 2xl:sticky 2xl:top-6">
-              <div className="rounded-[1.75rem] border border-orange-100 bg-white p-5">
+              <div className="rounded-[1.75rem] border border-orange-100 bg-white p-4 sm:p-5">
                 <div className="mb-4 flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-xl font-semibold text-slate-900">
-                      {t('preview.title')}
-                    </h2>
+                    <h2 className="text-xl font-semibold text-slate-900">{t('preview.title')}</h2>
                     <p className="text-sm text-slate-600">{t('preview.description')}</p>
                   </div>
                   <button
-                    className="rounded-full border border-orange-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                    className="rounded-full border border-orange-200 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700 transition hover:border-orange-300 hover:bg-orange-50 sm:text-xs"
+                    data-testid="preview-open-fullscreen"
                     onClick={() => setIsPreviewFullscreen(true)}
                     type="button"
                   >
@@ -685,9 +768,7 @@ export function CreateCupStudio() {
 
               <div className="rounded-[1.75rem] border border-orange-100 bg-slate-950 p-5 text-white">
                 <h2 className="text-lg font-semibold">{t('sendBox.title')}</h2>
-                <p className="mt-2 text-sm leading-7 text-slate-300">
-                  {t('sendBox.description')}
-                </p>
+                <p className="mt-2 text-sm leading-7 text-slate-300">{t('sendBox.description')}</p>
                 <ul className="mt-4 space-y-2 text-sm text-slate-300">
                   <li>{t('sendBox.points.dpi')}</li>
                   <li>{t('sendBox.points.margin')}</li>
@@ -695,6 +776,7 @@ export function CreateCupStudio() {
                 </ul>
                 <button
                   className="mt-5 w-full rounded-full bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-orange-300"
+                  data-testid="send-to-print-button"
                   disabled={layers.length === 0 || isSubmitting}
                   onClick={submitToPrint}
                   type="button"
@@ -702,7 +784,7 @@ export function CreateCupStudio() {
                   {isSubmitting ? t('sendBox.sending') : t('sendBox.submit')}
                 </button>
                 {statusMessage ? (
-                  <p className="mt-4 rounded-[1rem] bg-white/10 px-4 py-3 text-sm text-slate-100">
+                  <p className="mt-4 rounded-[1rem] bg-white/10 px-4 py-3 text-sm text-slate-100" data-testid="status-message">
                     {statusMessage}
                   </p>
                 ) : null}
@@ -713,17 +795,16 @@ export function CreateCupStudio() {
       </div>
 
       {isPreviewFullscreen ? (
-        <div className="fixed inset-0 z-50 bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+        <div className="fixed inset-0 z-50 bg-slate-950/75 p-3 backdrop-blur-sm sm:p-6" data-testid="preview-modal">
           <div className="mx-auto flex h-full max-w-6xl flex-col rounded-[2rem] border border-white/10 bg-white p-4 shadow-2xl sm:p-6">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-semibold text-slate-900">
-                  {t('preview.title')}
-                </h2>
+                <h2 className="text-2xl font-semibold text-slate-900">{t('preview.title')}</h2>
                 <p className="mt-1 text-sm text-slate-600">{t('preview.description')}</p>
               </div>
               <button
                 className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-300 hover:bg-orange-50"
+                data-testid="preview-close-fullscreen"
                 onClick={() => setIsPreviewFullscreen(false)}
                 type="button"
               >
@@ -747,7 +828,7 @@ function EditableImageLayer({
   onSelect,
   onChange
 }: {
-  layer: DesignLayer;
+  layer: ImageLayer;
   isSelected: boolean;
   onSelect: () => void;
   onChange: (patch: Partial<DesignLayer>) => void;
@@ -773,10 +854,7 @@ function EditableImageLayer({
         image={image ?? undefined}
         onClick={onSelect}
         onDragEnd={(event: KonvaEventObject<DragEvent>) => {
-          onChange({
-            x: event.target.x(),
-            y: event.target.y()
-          });
+          onChange({x: event.target.x(), y: event.target.y()});
         }}
         onTap={onSelect}
         onTransformEnd={() => {
@@ -822,6 +900,92 @@ function EditableImageLayer({
   );
 }
 
+function EditableTextLayer({
+  layer,
+  isSelected,
+  onSelect,
+  onChange
+}: {
+  layer: TextLayer;
+  isSelected: boolean;
+  onSelect: () => void;
+  onChange: (patch: Partial<DesignLayer>) => void;
+}) {
+  const textRef = useRef<KonvaTextNode | null>(null);
+  const transformerRef = useRef<KonvaTransformer | null>(null);
+
+  useEffect(() => {
+    if (!isSelected || !transformerRef.current || !textRef.current) {
+      return;
+    }
+
+    transformerRef.current.nodes([textRef.current]);
+    transformerRef.current.getLayer()?.batchDraw();
+  }, [isSelected]);
+
+  return (
+    <>
+      <KonvaText
+        align={layer.align}
+        draggable
+        fill={layer.fill}
+        fontFamily={layer.fontFamily}
+        fontSize={layer.fontSize}
+        height={layer.height}
+        onClick={onSelect}
+        onDragEnd={(event: KonvaEventObject<DragEvent>) => {
+          onChange({x: event.target.x(), y: event.target.y()});
+        }}
+        onTap={onSelect}
+        onTransformEnd={() => {
+          const node = textRef.current;
+
+          if (!node) {
+            return;
+          }
+
+          const scaleX = node.scaleX();
+          const scaleY = node.scaleY();
+          const nextFontSize = Math.max(18, Math.round(layer.fontSize * scaleY));
+
+          node.scaleX(1);
+          node.scaleY(1);
+
+          onChange({
+            x: node.x(),
+            y: node.y(),
+            rotation: node.rotation(),
+            width: Math.max(100, node.width() * scaleX),
+            height: Math.max(nextFontSize * 1.5, node.height() * scaleY),
+            fontSize: nextFontSize
+          } as Partial<DesignLayer>);
+        }}
+        opacity={layer.opacity}
+        padding={8}
+        ref={textRef}
+        rotation={layer.rotation}
+        text={layer.text}
+        width={layer.width}
+        wrap="word"
+        x={layer.x}
+        y={layer.y}
+      />
+      {isSelected ? (
+        <Transformer
+          anchorCornerRadius={999}
+          anchorFill="#f97316"
+          anchorSize={11}
+          borderDash={[4, 4]}
+          borderStroke="#ea580c"
+          enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
+          ref={transformerRef}
+          rotateAnchorOffset={20}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
   const texture = useMemo(() => {
     if (!textureUrl) {
@@ -836,31 +1000,19 @@ function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
     return loadedTexture;
   }, [textureUrl]);
 
-  useEffect(() => {
-    return () => {
-      texture?.dispose();
-    };
-  }, [texture]);
+  useEffect(() => () => texture?.dispose(), [texture]);
 
   const wallThickness = 0.08;
-  const mugModelSource = resolveAssetSource(
-    process.env.NEXT_PUBLIC_MUG_MODEL_URL?.trim() || 'models/11oz-Mug.fbx'
-  );
+  const mugModelSource = resolveAssetSource(process.env.NEXT_PUBLIC_MUG_MODEL_URL?.trim() || 'models/11oz-Mug.fbx');
   const mugModelFormat =
     (process.env.NEXT_PUBLIC_MUG_MODEL_FORMAT?.trim().toLowerCase() as MugModelFormat | undefined) ??
     inferMugModelFormat(mugModelSource);
-  const mugModelScale = Number(process.env.NEXT_PUBLIC_MUG_MODEL_SCALE ?? '0.012');
+  const mugModelScale = Number(process.env.NEXT_PUBLIC_MUG_MODEL_SCALE ?? '1');
   const mugModelRotationY = Number(process.env.NEXT_PUBLIC_MUG_MODEL_ROTATION_Y ?? String(Math.PI));
-  const mugModelOffsetY = Number(process.env.NEXT_PUBLIC_MUG_MODEL_OFFSET_Y ?? '-0.9');
-  const bottomArtSource = resolveAssetSource(
-    process.env.NEXT_PUBLIC_MUG_BOTTOM_ART?.trim()
-  );
-  const bottomArtRadius = Number(
-    process.env.NEXT_PUBLIC_MUG_BOTTOM_ART_RADIUS ?? String(spec.radiusBottom * 0.55)
-  );
-  const bottomArtY = Number(
-    process.env.NEXT_PUBLIC_MUG_BOTTOM_ART_Y ?? String(-spec.bodyHeight / 2 - 0.003)
-  );
+  const mugModelOffsetY = Number(process.env.NEXT_PUBLIC_MUG_MODEL_OFFSET_Y ?? '0');
+  const bottomArtSource = resolveAssetSource(process.env.NEXT_PUBLIC_MUG_BOTTOM_ART?.trim());
+  const bottomArtRadius = Number(process.env.NEXT_PUBLIC_MUG_BOTTOM_ART_RADIUS ?? String(spec.radiusBottom * 0.55));
+  const bottomArtY = Number(process.env.NEXT_PUBLIC_MUG_BOTTOM_ART_Y ?? String(-spec.bodyHeight / 2 - 0.003));
 
   const bottomArtTexture = useMemo(() => {
     if (!bottomArtSource) {
@@ -872,37 +1024,39 @@ function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
     return loadedTexture;
   }, [bottomArtSource]);
 
-  useEffect(() => {
-    return () => {
-      bottomArtTexture?.dispose();
-    };
-  }, [bottomArtTexture]);
+  useEffect(() => () => bottomArtTexture?.dispose(), [bottomArtTexture]);
 
-  const bodyMaterial = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: spec.bodyColor,
-      roughness: 0.35,
-      metalness: 0.04,
-      map: texture ?? undefined
-    });
-  }, [spec.bodyColor, texture]);
+  const bodyMaterial = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: spec.bodyColor,
+        roughness: 0.35,
+        metalness: 0.04,
+        map: texture ?? undefined
+      }),
+    [spec.bodyColor, texture]
+  );
 
-  const accentMaterial = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: spec.accentColor ?? spec.bodyColor,
-      roughness: 0.4,
-      metalness: 0.04
-    });
-  }, [spec.accentColor, spec.bodyColor]);
+  const accentMaterial = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: spec.accentColor ?? spec.bodyColor,
+        roughness: 0.4,
+        metalness: 0.04
+      }),
+    [spec.accentColor, spec.bodyColor]
+  );
 
-  const innerMaterial = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: '#fffefb',
-      roughness: 0.45,
-      metalness: 0.02,
-      side: THREE.BackSide
-    });
-  }, []);
+  const innerMaterial = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: '#fffefb',
+        roughness: 0.45,
+        metalness: 0.02,
+        side: THREE.BackSide
+      }),
+    []
+  );
 
   useEffect(() => {
     return () => {
@@ -927,9 +1081,7 @@ function MugPreview3D({spec, textureUrl}: {spec: MugSpec; textureUrl: string}) {
       ) : (
         <>
           <mesh material={bodyMaterial}>
-            <cylinderGeometry
-              args={[spec.radiusTop, spec.radiusBottom, spec.bodyHeight, 96, 1, true]}
-            />
+            <cylinderGeometry args={[spec.radiusTop, spec.radiusBottom, spec.bodyHeight, 96, 1, true]} />
           </mesh>
           <mesh material={innerMaterial} position={[0, -0.01, 0]}>
             <cylinderGeometry
@@ -1115,14 +1267,12 @@ function applyTextureToMugModel(root: THREE.Object3D, texture: THREE.Texture | n
     }
 
     const isBody = child === largestMesh;
-    const material = new THREE.MeshStandardMaterial({
+    child.material = new THREE.MeshStandardMaterial({
       color: isBody ? bodyColor : '#fffefb',
       roughness: isBody ? 0.35 : 0.4,
       metalness: 0.04,
       ...(isBody && texture ? {map: texture} : {})
     });
-
-    child.material = material;
     child.castShadow = false;
     child.receiveShadow = false;
   });
@@ -1219,10 +1369,11 @@ function PreviewCanvas({
     <div
       className={[
         'overflow-hidden rounded-[1.5rem] border border-orange-100 bg-[radial-gradient(circle_at_top,_rgba(255,237,213,0.92),_transparent_50%),linear-gradient(180deg,_#fff7ed_0%,_#ffffff_100%)]',
-        fullscreen ? 'flex h-full min-h-0 flex-col' : ''
+        fullscreen ? 'flex h-full min-h-[60vh] flex-col' : ''
       ].join(' ')}
+      data-testid={fullscreen ? 'preview-canvas-fullscreen' : 'preview-canvas'}
     >
-      <div className={fullscreen ? 'min-h-0 flex-1' : 'h-[360px]'}>
+      <div className={fullscreen ? 'min-h-0 flex-1' : 'h-[280px] sm:h-[360px]'}>
         <Canvas camera={{position: [0, 0.06, fullscreen ? 5.25 : 5.0], fov: fullscreen ? 33 : 37}}>
           <ambientLight intensity={0.75} />
           <directionalLight intensity={1.1} position={[4, 5, 5]} />
@@ -1259,7 +1410,8 @@ function RangeField({
   max,
   step,
   value,
-  onChange
+  onChange,
+  testId
 }: {
   label: string;
   min: number;
@@ -1267,6 +1419,7 @@ function RangeField({
   step: number;
   value: number;
   onChange: (value: number) => void;
+  testId?: string;
 }) {
   return (
     <label className="grid gap-2 text-sm text-slate-700">
@@ -1275,6 +1428,7 @@ function RangeField({
         <span className="text-slate-500">{value.toFixed(step < 1 ? 2 : 0)}</span>
       </span>
       <input
+        data-testid={testId}
         max={max}
         min={min}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -1289,11 +1443,13 @@ function RangeField({
 function ActionButton({
   label,
   onClick,
-  destructive = false
+  destructive = false,
+  testId
 }: {
   label: string;
   onClick: () => void;
   destructive?: boolean;
+  testId?: string;
 }) {
   return (
     <button
@@ -1303,6 +1459,7 @@ function ActionButton({
           ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
           : 'bg-white text-slate-700 hover:bg-orange-100'
       ].join(' ')}
+      data-testid={testId}
       onClick={onClick}
       type="button"
     >

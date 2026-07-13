@@ -1,0 +1,122 @@
+{
+  "Navigation": {
+    "home": "Strona główna",
+    "createCup": "Stwórz swój projekt",
+    "localeNames": {
+      "uk": "UA",
+      "en": "EN",
+      "pl": "PL"
+    }
+  },
+  "HomePage": {
+    "eyebrow": "Personalizacja kubków sublimacyjnych",
+    "title": "Zaprojektuj własny kubek online i przygotuj plik gotowy do druku w kilka minut",
+    "description": "Wybierz model kubka, ułóż grafikę na warstwach, sprawdź efekt w 3D i wyślij gotowy projekt do druku przez API.",
+    "ctaPrimary": "Otwórz kreator",
+    "ctaSecondary": "Zobacz studio 3D",
+    "localeLabel": "Aktywny język",
+    "stateLabel": "Tryb produktu",
+    "stateValue": "Studio personalizacji",
+    "themeLabel": "Gotowe modele kubków",
+    "themeValue": "11 Oz, czerwony rant, duży kubek, kubek z łyżeczką",
+    "printLabel": "Profil druku",
+    "printValue": "300 DPI, margines 10 mm przy uchu",
+    "cards": {
+      "docker": {
+        "title": "Docker dev",
+        "description": "Implementacja pozostaje zgodna z obecną aplikacją Next.js uruchamianą przez docker compose."
+      },
+      "editor": {
+        "title": "Edytor warstw bez ręcznego liczenia canvasu",
+        "description": "Edytor korzysta z gotowych bibliotek npm, dzięki czemu grafikę można szybko przesuwać, skalować, obracać i zmieniać kolejność warstw."
+      },
+      "print": {
+        "title": "Eksport pod sublimację",
+        "description": "Eksportowany projekt zachowuje profil 300 DPI i zostawia po 1 cm bezpiecznej strefy po obu stronach ucha."
+      }
+    }
+  },
+  "CreateCupPage": {
+    "eyebrow": "Studio nadruku na kubkach",
+    "title": "Stwórz własny projekt kubka",
+    "description": "Buduj projekt warstwami, przesuwaj grafikę po obszarze nadruku i od razu sprawdzaj efekt na kubku 3D.",
+    "mugSelectorLabel": "Wybierz model kubka",
+    "printSpecLabel": "Specyfikacja druku",
+    "printSpec": {
+      "template": "Szablon",
+      "printable": "Obszar nadruku",
+      "margin": "Margines przy uchu",
+      "dpi": "Gęstość"
+    },
+    "mugs": {
+      "classic11oz": {
+        "title": "Klasyczny kubek",
+        "summary": "Standardowy kubek 11 Oz do najczęstszych projektów sublimacyjnych."
+      },
+      "rimRed": {
+        "title": "Kubek z czerwonym rantem",
+        "summary": "Model 11 Oz z czerwonym akcentem na rancie i uchu."
+      },
+      "large15oz": {
+        "title": "Duży kubek",
+        "summary": "Szerszy obszar nadruku dla większych kompozycji i bardziej rozbudowanej grafiki."
+      },
+      "spoonHandle": {
+        "title": "Kubek z łyżeczką w uchu",
+        "summary": "Oryginalny kubek ze zintegrowaną łyżeczką i nieco niższym obszarem nadruku."
+      }
+    },
+    "editor": {
+      "title": "Edytor warstw",
+      "description": "Dodaj jeden lub kilka obrazów i swobodnie rozmieszczaj je na powierzchni kubka.",
+      "addLayer": "Dodaj warstwę",
+      "addText": "Dodaj tekst",
+      "clear": "Wyczyść projekt",
+      "canvasHelp": "Zacienione pasy pokazują strefy przy uchu, które nie będą drukowane.",
+      "safeZoneLabel": "Bezpieczna strefa przy uchu",
+      "printableLabel": "Obszar nadruku"
+    },
+    "layers": {
+      "title": "Warstwy projektu",
+      "description": "Wybierz warstwę, aby przesuwać ją po obszarze roboczym lub zmieniać jej parametry.",
+      "count": "{count, plural, one {# warstwa} few {# warstwy} many {# warstw} other {# warstwy}}",
+      "empty": "Nie dodano jeszcze żadnych warstw projektu.",
+      "kinds": {
+        "image": "Obraz",
+        "text": "Tekst"
+      }
+    },
+    "inspector": {
+      "text": "Tekst",
+      "font": "Czcionka",
+      "fontSize": "Rozmiar tekstu",
+      "color": "Kolor tekstu",
+      "opacity": "Przezroczystość",
+      "rotation": "Obrót",
+      "layerUp": "Przesuń warstwę wyżej",
+      "layerDown": "Przesuń warstwę niżej",
+      "delete": "Usuń warstwę"
+    },
+    "preview": {
+      "title": "Podgląd 3D",
+      "description": "Obracaj kubek, aby sprawdzić, jak projekt układa się na jego powierzchni.",
+      "fullscreen": "Podgląd na całym ekranie",
+      "close": "Zamknij"
+    },
+    "sendBox": {
+      "title": "Wyślij do druku",
+      "description": "Po wysłaniu aplikacja generuje gotowy do druku plik PNG i przekazuje go do zewnętrznego API druku.",
+      "points": {
+        "dpi": "Eksport PNG jest generowany w 300 DPI.",
+        "margin": "Po obu stronach ucha pozostaje niedrukowalna strefa bezpieczeństwa 10 mm.",
+        "format": "Payload API zawiera obraz oraz metadane fizycznego rozmiaru w milimetrach."
+      },
+      "submit": "Wyślij do druku",
+      "sending": "Wysyłanie..."
+    },
+    "status": {
+      "success": "Projekt został wysłany do API druku.",
+      "errorGeneric": "Nie udało się wysłać projektu do druku."
+    }
+  }
+}

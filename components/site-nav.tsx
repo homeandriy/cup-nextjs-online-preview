@@ -8,7 +8,6 @@ import {routing} from '@/i18n/routing';
 
 function switchLocale(pathname: string, locale: string) {
   const normalizedPath = pathname || '/';
-
   return normalizedPath.replace(/^\/(uk|en|pl)(?=\/|$)/, `/${locale}`);
 }
 
@@ -27,16 +26,17 @@ export function SiteNav({current}: SiteNavProps) {
         <div className="flex flex-wrap items-center gap-3">
           <Link
             className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white"
+            data-testid="brand-home-link"
             href={`/${locale}`}
           >
             CUP
           </Link>
 
           <nav className="flex flex-wrap gap-2">
-            <NavLink active={current === 'home'} href={`/${locale}`}>
+            <NavLink active={current === 'home'} href={`/${locale}`} testId="site-nav-home">
               {t('home')}
             </NavLink>
-            <NavLink active={current === 'create-cup'} href={`/${locale}/create-cup`}>
+            <NavLink active={current === 'create-cup'} href={`/${locale}/create-cup`} testId="site-nav-create-cup">
               {t('createCup')}
             </NavLink>
           </nav>
@@ -52,9 +52,10 @@ export function SiteNav({current}: SiteNavProps) {
                 className={[
                   'rounded-full px-3 py-2 text-sm font-semibold transition',
                   isActive
-                    ? 'bg-slate-900 text-white'
+                    ? 'border border-orange-300 bg-orange-100 text-orange-700'
                     : 'border border-orange-200 text-slate-700 hover:border-orange-300 hover:bg-orange-50'
                 ].join(' ')}
+                data-testid={`locale-switch-${item}`}
                 href={switchLocale(pathname, item)}
               >
                 {t(`localeNames.${item}`)}
@@ -70,11 +71,13 @@ export function SiteNav({current}: SiteNavProps) {
 function NavLink({
   href,
   active,
-  children
+  children,
+  testId
 }: {
   href: string;
   active: boolean;
   children: string;
+  testId: string;
 }) {
   return (
     <Link
@@ -84,6 +87,7 @@ function NavLink({
           ? 'bg-orange-100 text-orange-700'
           : 'text-slate-600 hover:bg-orange-50 hover:text-orange-700'
       ].join(' ')}
+      data-testid={testId}
       href={href}
     >
       {children}

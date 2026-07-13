@@ -31,6 +31,9 @@ export default async function LocaleLayout({
 
   return (
     <html lang={locale}>
+      <head>
+        <script data-cy-bootstrap="true" suppressHydrationWarning />
+      </head>
       <body>
         <NextIntlClientProvider messages={messages}>
           <AppStoreProvider>{children}</AppStoreProvider>

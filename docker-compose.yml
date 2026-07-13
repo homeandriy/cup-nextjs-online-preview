@@ -15,9 +15,19 @@ services:
       - next_cache:/app/.next
     command: >-
       sh -c "mkdir -p /app/node_modules /app/.next
-      && chown -R 1000:1000 /app/node_modules /app/.next
+      && chown -R 1000:1000 /app/node_modules /app/.next /app/package.json /app/package-lock.json
       && su-exec 1000:1000 npm ci
       && exec su-exec 1000:1000 npm run dev"
+
+  cypress:
+    image: cypress/included:15.1.0
+    working_dir: /e2e
+    depends_on:
+      - next-app
+    environment:
+      CYPRESS_baseUrl: http://next-app:3010
+    volumes:
+      - .:/e2e
 
 volumes:
   next_cache:

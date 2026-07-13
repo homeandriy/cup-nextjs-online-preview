@@ -1,3 +1,14 @@
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/rubik/400.css";
+@import "@fontsource/nunito/400.css";
+@import "@fontsource/montserrat/500.css";
+@import "@fontsource/open-sans/400.css";
+@import "@fontsource/lora/400.css";
+@import "@fontsource/playfair-display/400.css";
+@import "@fontsource/oswald/400.css";
+@import "@fontsource/pt-serif/400.css";
+@import "@fontsource/roboto-slab/400.css";
 @import "tailwindcss";
 
 :root {
@@ -26,7 +37,7 @@ body {
   background:
     radial-gradient(circle at top, rgba(255, 237, 213, 0.9), transparent 38%),
     linear-gradient(180deg, #fff7ed 0%, #ffffff 52%, #fffbeb 100%);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', 'Open Sans', Arial, Helvetica, sans-serif;
 }
 
 a {
@@ -34,6 +45,13 @@ a {
   text-decoration: none;
 }
 
-button {
+button,
+input,
+select,
+textarea {
   font: inherit;
+}
+
+textarea {
+  resize: vertical;
 }
