@@ -1,0 +1,113 @@
+{
+  "Navigation": {
+    "home": "Home",
+    "createCup": "Create your own",
+    "localeNames": {
+      "uk": "UA",
+      "en": "EN",
+      "pl": "PL"
+    }
+  },
+  "HomePage": {
+    "eyebrow": "Sublimation mug personalization",
+    "title": "Design a custom mug online and prepare a print-ready layout in minutes",
+    "description": "Choose a mug model, place artwork on layers, review the result in 3D, and send the ready-to-print image through an API.",
+    "ctaPrimary": "Open the designer",
+    "ctaSecondary": "See the 3D studio",
+    "localeLabel": "Active locale",
+    "stateLabel": "Product mode",
+    "stateValue": "Customization studio",
+    "themeLabel": "Ready mug models",
+    "themeValue": "11 Oz, red rim, large mug, spoon-handle mug",
+    "printLabel": "Print profile",
+    "printValue": "300 DPI, 10 mm handle margin",
+    "cards": {
+      "docker": {
+        "title": "Docker dev",
+        "description": "The implementation stays aligned with the current Next.js app running through docker compose."
+      },
+      "editor": {
+        "title": "Layer editor, not hand-coded canvas math",
+        "description": "The editor uses ready npm libraries so artwork can be dragged, scaled, rotated, and reordered quickly."
+      },
+      "print": {
+        "title": "Sublimation-aware output",
+        "description": "The exported artwork keeps a 300 DPI profile and reserves 1 cm safe zones near the handle on both sides."
+      }
+    }
+  },
+  "CreateCupPage": {
+    "eyebrow": "Mug print studio",
+    "title": "Create your own mug design",
+    "description": "Build the design in layers, move artwork across the printable wrap, and inspect the result on a 3D mug.",
+    "mugSelectorLabel": "Choose a mug model",
+    "printSpecLabel": "Print specification",
+    "printSpec": {
+      "template": "Template",
+      "printable": "Printable area",
+      "margin": "Handle margin",
+      "dpi": "Density"
+    },
+    "mugs": {
+      "classic11oz": {
+        "title": "Classic mug",
+        "summary": "A standard 11 Oz mug for the most common sublimation jobs."
+      },
+      "rimRed": {
+        "title": "Red rim mug",
+        "summary": "An 11 Oz body with a red accent ring and handle details."
+      },
+      "large15oz": {
+        "title": "Large mug",
+        "summary": "A wider print wrap for fuller compositions and larger graphics."
+      },
+      "spoonHandle": {
+        "title": "Spoon-handle mug",
+        "summary": "A novelty mug with an integrated spoon and a slightly shorter print zone."
+      }
+    },
+    "editor": {
+      "title": "Layer editor",
+      "description": "Add one or more images and position them freely on the mug surface.",
+      "addLayer": "Add layer",
+      "clear": "Clear design",
+      "canvasHelp": "The shaded strips show the handle zones that will not be printed.",
+      "safeZoneLabel": "Handle safe zone",
+      "printableLabel": "Printable area"
+    },
+    "layers": {
+      "title": "Design layers",
+      "description": "Select a layer to move it on canvas or adjust its properties.",
+      "count": "{count, plural, one {# layer} other {# layers}}",
+      "empty": "No artwork layers have been added yet."
+    },
+    "inspector": {
+      "opacity": "Opacity",
+      "rotation": "Rotation",
+      "layerUp": "Move layer up",
+      "layerDown": "Move layer down",
+      "delete": "Delete layer"
+    },
+    "preview": {
+      "title": "3D preview",
+      "description": "Rotate the mug to inspect how the design wraps around the surface.",
+      "fullscreen": "Fullscreen preview",
+      "close": "Close"
+    },
+    "sendBox": {
+      "title": "Send to print",
+      "description": "When you submit, the app generates a print-ready PNG and forwards it to the external print API.",
+      "points": {
+        "dpi": "PNG export is generated at 300 DPI.",
+        "margin": "Both handle margins keep a 10 mm non-printable safety zone.",
+        "format": "The API payload includes the image and physical size metadata in millimeters."
+      },
+      "submit": "Send to print",
+      "sending": "Sending..."
+    },
+    "status": {
+      "success": "The design was sent to the print API.",
+      "errorGeneric": "The design could not be sent to print."
+    }
+  }
+}

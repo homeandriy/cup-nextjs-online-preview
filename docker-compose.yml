@@ -1,0 +1,23 @@
+services:
+  next-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: cup-real-time-next-dev
+    user: "0:0"
+    ports:
+      - "3010:3010"
+    environment:
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - .:/app
+      - next_cache:/app/.next
+    command: >-
+      sh -c "mkdir -p /app/node_modules /app/.next
+      && chown -R 1000:1000 /app/node_modules /app/.next
+      && su-exec 1000:1000 npm ci
+      && exec su-exec 1000:1000 npm run dev"
+
+volumes:
+  next_cache:

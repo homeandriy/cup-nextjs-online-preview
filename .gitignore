@@ -1,0 +1,11 @@
+.next
+node_modules
+npm-debug.log*
+Dockerfile*
+.DS_Store
+.idea
+.env
+.env.local
+.env.*.local
+
+.agents

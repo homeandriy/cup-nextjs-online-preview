@@ -1,0 +1,34 @@
+{
+  "name": "cup-real-time-project",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3010",
+    "build": "next build",
+    "start": "next start -p 3010",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "konva": "^10.3.0",
+    "next": "^16.2.9",
+    "next-intl": "^4.4.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-konva": "^19.2.5",
+    "three": "^0.185.1",
+    "use-image": "^1.1.4",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.12",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.11",
+    "@types/react-dom": "^19.1.7",
+    "eslint": "^9.34.0",
+    "eslint-config-next": "^16.2.9",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2"
+  }
+}
